@@ -1,1 +1,2 @@
 # MCBB_VoA
+This repository contains code and outputs for the Men's College Basketball (D1) Vortex of Accuracy. When it actually ends up being created, it outputs an offensive rating, a defensive rating, and an overall rating, which is computed by subtracting the defensive rating from the offensive rating. The overall rating represents the number of points a given team would be expected to beat the hypothetical average D1 basketball team by on a neutral court.
