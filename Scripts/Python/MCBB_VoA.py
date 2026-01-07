@@ -12,7 +12,7 @@ from datetime import datetime
 
 load_dotenv()
 
-
+### setting up API configuration
 configuration = cbbd.Configuration(host="https://api.collegebasketballdata.com", access_token = os.getenv("CBB_TOKEN"))
 api_client = cbbd.ApiClient(configuration)
 
