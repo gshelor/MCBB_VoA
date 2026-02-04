@@ -1,21 +1,21 @@
 ##### Men's College Basketball Vortex of Accuracy #####
-
+### no longer the operational script what with the creation of the cbbd data api
+### may be turned into script for producing plots and/or gt tables
+### may also try to use hoopR for play by play data? CBBD API is disappointingly poor with providing that because the only way to access pbp data is to get it for individual dates or for specific games and that's just so incredibly inefficient for the purposes of a VoA
+## which means that if I tried to get it that way for the VoA that I'd be using lots of API requests too and the CBBD API free tier is generous but not that generous
+### hoopR seems to be good about getting PBP data?
 ##### Loading Packages #####
 library(pacman)
-p_load(hoopR, tidyverse, gtExtras, ggimage, cbbdata, fastDummies)
+p_load(hoopR, tidyverse, gtExtras, ggimage, cbbdata, fastDummies, here)
 
 ##### Reading in Data #####
 `%nin%` = Negate(`%in%`)
-cbbdata::cbd_login()
-D1Teams <- cbbdata::cbd_teams() |>
-  filter(espn_display != "Hartford Hawks") |>
-  filter(espn_short_display != "St Francis BK")
 ### App State, IUPUI, Maryland-Eastern Shore, A&M Commerce need to be renamed
-ESPNTeams <- hoopR::espn_mbb_teams(2025)
+# ESPNTeams <- hoopR::espn_mbb_teams(2026)
 ### lindenwood (new D1 team) isn't in the espn_mbb_teams thing
 ## neither is Queens, Southern Indiana
 
-PBP <- hoopR::load_mbb_pbp(2025) |>
+PBP <- hoopR::load_mbb_pbp(2026) |>
   select(
     season,
     game_id,
@@ -54,6 +54,13 @@ PBP <- hoopR::load_mbb_pbp(2025) |>
     end_game_seconds_remaining,
     game_date
   )
+poopypants <- read_csv(here("poopypants.csv"))
+for (x in poopypants$team) {
+  if (x %nin% PBP$away_team_name) {
+    print(x)
+  }
+}
+
 test_PBP <- PBP |>
   filter(home_team_name == "IU Indianapolis")
 ### testing out dummy variables
