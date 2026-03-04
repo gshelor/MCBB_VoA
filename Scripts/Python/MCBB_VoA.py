@@ -1,25 +1,30 @@
 ##### Men's D1 College Basketball Vortex of Accuracy Version 0.1 #####
 ### This script reads in data from the College Basketball Data (CBBD) API and uses it to construct predictive team-strength ratings which are used to make projections for future games.
-## possibly uses opponent-adjusted stats created in R using play-by-play data from hoopR because the cbbd API doesn't provide pbp in a useful way
-## if I had unlimited API calls I guess it'd be worth it but I don't
+## possibly uses opponent-adjusted stats created in R using game-level data because the PBP data is too big
 ##### importing libraries and setting up python environment and API connection #####
 import cbbd
 import polars as pl
+import pandas as pd
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sbn
 from dotenv import load_dotenv
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import cmdstanpy
 import pymc as pm
 import arviz as az
 import preliz as pz
+import statsmodels.formula.api as smf
+import random
 # import sportsdataverse
 # import json
 
 ### loading environmental variables (API token, so it's not directly printed in the code for security)
 load_dotenv()
+
+### reading in script of functions for cleaning VoA data
+exec(open(os.path.join(os.getcwd(), "Scripts", "Python", "MCBB_VoAFuncs.py")).read())
 
 ### storing values for season, month, day maybe, and which iteration of the VoA this is (for filenames, probably)
 ## cbb_season to be used as year/season input for team season stats grab from API
@@ -33,7 +38,7 @@ else:
     ### for VoA ratings being made after January
     cbb_season = today_dt.year - 1
     cbb_season_str = str(today_dt.year - 1) + "/" + str(today_dt.year)
-###
+### storing which iteration of the VoA this is for the season
 voa_num = input("Which release of the VoA is this for the season? ")
 
 
@@ -44,80 +49,80 @@ configuration = cbbd.Configuration(
 api_client = cbbd.ApiClient(configuration)
 
 ### creating an instance with the stats, games, and lines API endpoints
-api_instance = cbbd.StatsApi(api_client)
-# playsapi_instance = cbbd.PlaysApi(api_client)
-# gamesapi_instance = cbbd.GamesApi(api_client)
+statsapi_instance = cbbd.StatsApi(api_client)
+gamesapi_instance = cbbd.GamesApi(api_client)
 
 # Teams_json = teamsapi_instance.get_teams(season = 2025)
-# Plays_json = playsapi_instance.get_plays_by_date(datetime(2025, 12, 2))
-##### Initial Request for team season stats #####
+##### Pulling and cleaning Team stats #####
 ### output is basically a list of json stuff from what I can tell, not that I'm overly familiar with json
 ## next step after this is coercing it into a polars data frame
 if today_dt.month == 10:
     ### getting stats information from CBB data API
-    TeamSeasonStats_json_PY2 = api_instance.get_team_season_stats(cbb_season - 2)
-    TeamSeasonStats_json_PY1 = api_instance.get_team_season_stats(cbb_season - 1)
-    ### getting games for first 
-    # Games_json = gamesapi_instance.get_games(datetime(today_dt.year, 10, 1), datetime(2026, 2, 15))
-elif today_dt.month == 11:
-    TeamSeasonStats_json = api_instance.get_team_season_stats(cbb_season)
+    TeamSeasonStats_json_PY2 = statsapi_instance.get_team_season_stats(cbb_season - 2)
+    TeamSeasonStats_json_PY1 = statsapi_instance.get_team_season_stats(cbb_season - 1)
+elif today_dt.month == 11 and today_dt.day < 15:
+    ### reading in PY1 stats saved from preseason
+    TeamSeasonStats_json = statsapi_instance.get_team_season_stats(cbb_season)
+else:
+    ### only current season info
+    TeamSeasonStats_json = statsapi_instance.get_team_season_stats(cbb_season)
+    VoAVariables = clean_season_stats(TeamSeasonStats_json)
+    ### getting games for opponent-adjusted stats
+    ### in the future, I'll have a saved csv of games stats for a season so I don't have to hit the API for every game in the season
+    Games_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2025, 11, 1), end_date_range = datetime(2025, 11, 25, 23, 59, 59))
+    Games2_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2025, 11, 26), end_date_range = datetime(2025, 12, 25, 23, 59, 59))
+    Games3_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2025, 12, 26), end_date_range = datetime(2026, 1, 15, 23, 59, 59))
+    Games4_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2026, 1, 16), end_date_range = datetime(2026, 1, 31, 23, 59, 59))
+    Games5_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2026, 2, 1), end_date_range = datetime(2026, 3, 2, 23, 59, 59))
+    # Games6_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2026, 3, 3), end_date_range = datetime(today_dt.year, today_dt.month, today_dt.day - 1, 23, 59, 59))
+    CleanGames_df = clean_team_game_stats(Games_json)
+    CleanGames2_df = clean_team_game_stats(Games2_json)
+    CleanGames3_df = clean_team_game_stats(Games3_json)
+    CleanGames4_df = clean_team_game_stats(Games4_json)
+    CleanGames5_df = clean_team_game_stats(Games5_json)
+    ### binding cleaned games together
+    ### polars gives a warning that the is_in() (in the filter) part of the code below is deprecated (as of March 2, 2026 I'm on polars version 1.37.1) but it works and does what I want it to and everybody in the github issue it links to (https://github.com/pola-rs/polars/issues/22149) is mad that it would be producing an issue at all, given that the below usage of is_in() is what they all think would be the most common usage would be (and I agree) so hopefully it stays intact
+    AllGamesStatAdj = pl.concat(
+        [CleanGames_df, CleanGames2_df, CleanGames3_df, CleanGames4_df, CleanGames5_df], how = "vertical_relaxed").filter(
+            (pl.col("team").is_in(VoAVariables['team']) & pl.col("opponent").is_in(VoAVariables['team']))
+        ).with_columns(
+            pl.when(pl.col('neutral_site') == True).then(0)
+            .when(pl.col('neutral_site') == False, pl.col('is_home') == True).then(1)
+            .otherwise(-1)
+            .alias("hfa")
+        )
+    AllGamesPaceAdj = AllGamesStatAdj.group_by("game_id").first()
+    
+
+### Once data is loaded, I should have: VoAVariables, which is the aggregated season stats, and AllGames, which is the combined dataframe of all games with their various stats columns unnested
+
+### now onto using mixed-effects models to get opponent-adjusted stats
+##### Opponent Adjusted Stats using game-level data #####
+
+
+# Assuming 'teams_master_df' is your existing Polars dataframe with all teams
+# teams_master_df = teams_master_df.join(
+#     adj_pace_results, 
+#     on="team", 
+#     how="left"
+# )
+
+# # Sort by the fastest teams in the country
+# teams_master_df = teams_master_df.sort("adj_pace", descending=True)
 
 
 
 
-### coercing list output with data in json format to polars dataframe
-TeamSeasonStats_df = pl.DataFrame(TeamSeasonStats_json)
-# Games_df = pl.DataFrame(Games_json)
-# Teams_df = pl.DataFrame(Teams_json)
 
-### unnesting season stats columns for each team and their respective opponents' averages (against them)
-TeamStatsCols = TeamSeasonStats_df['team_stats'].struct.unnest()
-OppTeamStatsCols = TeamSeasonStats_df['opponent_stats'].struct.unnest()
-### more unnesting necessary, and also setting column names so each column is unique
-for i in np.arange(0, len(TeamStatsCols.columns)):
-    if i == 0:
-        if TeamStatsCols[TeamStatsCols.columns[i]].dtype == pl.Struct:
-            TeamStats_df = TeamStatsCols[TeamStatsCols.columns[i]].struct.unnest()
-            col_prefix = str(TeamStatsCols.columns[i])
-            TeamStats_df = TeamStats_df.rename(lambda col_name: col_prefix + "_" + col_name)
-    else:
-        if TeamStatsCols[TeamStatsCols.columns[i]].dtype == pl.Struct:
-            temp_df = TeamStatsCols[TeamStatsCols.columns[i]].struct.unnest()
-            col_prefix = str(TeamStatsCols.columns[i])
-            temp_df = temp_df.rename(lambda col_name: col_prefix + "_" + col_name)
-            TeamStats_df = pl.concat([TeamStats_df, temp_df], how = "horizontal")
 
-### unnesting opposition team stats info
-for i in np.arange(0, len(OppTeamStatsCols.columns)):
-    if i == 0:
-        if OppTeamStatsCols[OppTeamStatsCols.columns[i]].dtype == pl.Struct:
-            OppTeamStats_df = OppTeamStatsCols[OppTeamStatsCols.columns[i]].struct.unnest()
-            col_prefix = str(OppTeamStatsCols.columns[i])
-            OppTeamStats_df = OppTeamStats_df.rename(lambda col_name: "opp_" + col_prefix + "_" + col_name)
-    else:
-        if OppTeamStatsCols[OppTeamStatsCols.columns[i]].dtype == pl.Struct:
-            temp_df = OppTeamStatsCols[OppTeamStatsCols.columns[i]].struct.unnest()
-            col_prefix = str(OppTeamStatsCols.columns[i])
-            temp_df = temp_df.rename(lambda col_name: "opp_" + col_prefix + "_" + col_name)
-            OppTeamStats_df = pl.concat([OppTeamStats_df, temp_df], how = "horizontal")
 
-### taking nested columns out of original team season stats data frame
-## binding them to this data frame
-VoAVariables = TeamSeasonStats_df.select(
-    pl.selectors.by_dtype(pl.Int64, pl.String, pl.Float64)
-)
-### binding unnested team stats and opposition stats (for each team's opponents) to original team variables df
-VoAVariables = pl.concat(items = [VoAVariables, TeamStats_df, OppTeamStats_df], how = "horizontal")
 
-### filtering out non-D1 teams
-## doesn't seem to be a great way to do this since there's no Division/classification field output by the CBBD API unless I wanted to do it manually (i do not), but conference luckily seems to serve as a perfectly fine proxy for the same thing since teams not in D1 are just not listed as having a conference
-VoAVariables = VoAVariables.filter(
-    ~pl.col("conference").is_null()
-)
+
+
 
 
 ### Saving final VoA csv
-# VoAVariables_df.write_csv(os.path.join(data_dir, "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + ".csv"))
+# VoAVariables.write_csv(os.path.join(data_dir, "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + ".csv"))
 
 ##### POOPYPANTS TESTING HERE #####
 # VoAVariables.write_csv(os.path.join(os.getcwd(), "poopypants.csv"))
