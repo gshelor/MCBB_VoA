@@ -7,6 +7,7 @@
 ## these should honestly already be imported based on how I intend to use this script but here they are for redundancy or whatever I guess
 import cbbd
 import polars as pl
+import pandas as pd
 import numpy as np
 import random
 import statsmodels.formula.api as smf
@@ -99,7 +100,7 @@ def opponent_adjustments(pace_df, full_df):
     ### fitting model
     ## For future: weight games by their time since current date, so more recent games are weighted more heavily than others
     pace_oppadj_fit = pace_oppadj_model.fit()
-    pace_oppadj_fit.summary()
+    # pace_oppadj_fit.summary()
     ### Extract adjustments and join to VoAVariables using polars and pandas (ugh)
     ### extracting intercept
     pace_intercept = pace_oppadj_fit.params['Intercept']
@@ -110,6 +111,78 @@ def opponent_adjustments(pace_df, full_df):
         for team_name, effect in pace_oppadj_fit.random_effects.items()
     ]
     ### calculating opponent-adjusted pace
-    paceadj_df = pl.DataFrame(team_pace_coefs).with_columns(
+    ### since pace is the first stat adjusted, this dataframe with the team and their corresponding adjusted value will be the dataframe that all the other adjusted stats dfs are joined to
+    AdjStats_df = pl.DataFrame(team_pace_coefs).with_columns(
         adj_pace = pl.col('adjpace_coef') + pace_intercept
     ).select(['team', 'adj_pace'])
+
+    ### performing opponent adjustments for select offensive stats
+    ## offensive stats: assists, true_shooting, opp_blocks, opp_steals, field_goals_pct, two_point_field_goals_pct, three_point_field_goals_pct, free_throws_pct, rebounds_offensive, turnovers_total, points_fast_break, points_off_turnovers, points_in_paint
+    ## defensive stats: opp_assists, opp_true_shooting, blocks, steals, opp_field_goals_pct, opp_two_point_field_goals_pct, opp_three_point_field_goals_pct, opp_free_throws_pct, rebounds_defensive, opp_turnovers_total, opp_points_fast_break, opp_points_off_turnovers, opp_points_in_paint
+
+    ### fitting opponent-adjusted models for offensive stats now
+    ### storing output dataframes in a list, will store the output dfs from the defensive models in this list too
+    adj_dflist = []
+    for i in ["assists", "true_shooting", "opp_blocks", "opp_steals", "field_goals_pct", "two_point_field_goals_pct", "three_point_field_goals_pct", "free_throws_pct", "rebounds_offensive", "turnovers_total", "points_fast_break", "points_off_turnovers", "points_in_paint", "points_per_poss"]:
+        ### setting name of new column where opponent-adjusted stats will be stored
+        new_colname = "adjoff_" + i
+        ### setting random seed
+        random.seed(802)
+        ### specifying formula, group effects, variance components
+        oppadj_model = smf.mixedlm(formula = f"{i} ~ hfa", data = full_df.to_pandas(), groups = full_df['team'], vc_formula={"opponent": "1 + C(opponent)"})
+        ### fitting model
+        ## For future: weight games by their time since current date, so more recent games are weighted more heavily than others
+        oppadj_fit = oppadj_model.fit()
+        # oppadj_fit.summary()
+        ### Extract adjustments and join to VoAVariables using polars and pandas (ugh)
+        ### extracting intercept
+        intercept = oppadj_fit.params['Intercept']
+
+        ### Extract adjusted coefficients and apply them to intercept to get adjusted metric
+        team_coefs = [
+            {"team": team_name, "adj_coef": float(effect.iloc[0])} 
+            for team_name, effect in oppadj_fit.random_effects.items()
+        ]
+        ### calculating opponent-adjusted pace
+        adj_df = pl.DataFrame(team_coefs).with_columns(
+            (pl.col("adj_coef") + intercept).alias(new_colname)
+        ).select(['team', new_colname])
+
+        ### appending df of team names and opp-adjusted stats to the list above
+        adj_dflist.append(adj_df)
+
+    ### fitting opponent-adjusted models for defensive stats now
+    ### storing output dataframes in the same list as above
+    for i in ["opp_assists", "opp_true_shooting", "blocks", "steals", "opp_field_goals_pct", "opp_two_point_field_goals_pct", "opp_three_point_field_goals_pct", "opp_free_throws_pct", "rebounds_defensive", "opp_turnovers_total", "opp_points_fast_break", "opp_points_off_turnovers", "opp_points_in_paint", "opp_points_per_poss"]:
+        ### setting name of new column where opponent-adjusted stats will be stored
+        new_colname = "adjdef_" + i
+        ### setting random seed
+        random.seed(802)
+        ### specifying formula, group effects, variance components
+        oppadj_model = smf.mixedlm(formula = f"{i} ~ hfa", data = full_df.to_pandas(), groups = full_df['team'], vc_formula={"opponent": "1 + C(opponent)"})
+        ### fitting model
+        oppadj_fit = oppadj_model.fit()
+        # oppadj_fit.summary()
+        ### Extract adjustments and join to VoAVariables using polars and pandas (ugh)
+        ### extracting intercept
+        intercept = oppadj_fit.params['Intercept']
+
+        ### Extract adjusted coefficients and add them to intercept to get adjusted metric
+        team_coefs = [
+            {"team": team_name, "adj_coef": float(effect.iloc[0])} 
+            for team_name, effect in oppadj_fit.random_effects.items()
+        ]
+        ### calculating opponent-adjusted pace
+        adj_df = pl.DataFrame(team_coefs).with_columns(
+            (pl.col("adj_coef") + intercept).alias(new_colname)
+        ).select(['team', new_colname])
+
+        ### appending df of team names and opp-adjusted stats to the list above
+        adj_dflist.append(adj_df)
+
+    ### binding dataframes of adjusted stats together
+    for x in np.arange(0, len(adj_dflist)):
+        AdjStats_df = AdjStats_df.join(adj_dflist[x], on = "team")
+
+    ### returning full df of adjusted stats and team, which will be bound to VoAVariables in the VoA script
+    return AdjStats_df
