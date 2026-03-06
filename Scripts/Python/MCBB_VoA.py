@@ -96,6 +96,8 @@ else:
             points_per_poss = pl.col("points_total") / pl.col("possessions"),
             opp_points_per_poss = pl.col("opp_points_total") / pl.col("opp_possessions")
         )
+    ### saving AllGamesStatAdj so I don't have to hit the API for every game every time I run the script
+    AllGamesStatAdj.write_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "GameStats", "MCBBD1VoA" + str(cbb_season) + "Games.csv"))
     AllGamesPaceAdj = AllGamesStatAdj.group_by("game_id").first()
     
 
