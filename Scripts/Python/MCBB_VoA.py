@@ -25,7 +25,7 @@ import selenium
 ### loading environmental variables (API token, so it's not directly printed in the code for security)
 load_dotenv()
 
-### reading in script of functions for cleaning VoA data
+### reading in script of functions for cleaning VoA data and occasional ad-hoc game projections
 exec(open(os.path.join(os.getcwd(), "Scripts", "Python", "MCBB_VoAFuncs.py")).read())
 
 ### storing values for season, month, day maybe, and which iteration of the VoA this is (for filenames, probably)
@@ -71,22 +71,23 @@ else:
     VoAVariables = clean_season_stats(TeamSeasonStats_json)
     ### getting games for opponent-adjusted stats
     ### in the future, I'll have a saved csv of games stats for a season so I don't have to hit the API for every game in the season
-    Games_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2025, 11, 1), end_date_range = datetime(2025, 11, 25, 23, 59, 59))
-    Games2_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2025, 11, 26), end_date_range = datetime(2025, 12, 25, 23, 59, 59))
-    Games3_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2025, 12, 26), end_date_range = datetime(2026, 1, 15, 23, 59, 59))
-    Games4_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2026, 1, 16), end_date_range = datetime(2026, 1, 31, 23, 59, 59))
-    Games5_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2026, 2, 1), end_date_range = datetime(2026, 3, 2, 23, 59, 59))
-    Games6_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2026, 3, 3), end_date_range = datetime(today_dt.year, today_dt.month, today_dt.day - 1, 23, 59, 59))
+    AllGamesStatAdj = pl.read_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "GameStats", "MCBBD1VoA" + str(cbb_season) + "Games.parquet"))
+    Games_json = gamesapi_instance.get_game_teams(start_date_range = max(AllGamesStatAdj['start_date']), end_date_range = datetime(today_dt.year, today_dt.month, today_dt.day - 1, 23, 59, 59))
+    # Games2_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2025, 11, 26), end_date_range = datetime(2025, 12, 25, 23, 59, 59))
+    # Games3_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2025, 12, 26), end_date_range = datetime(2026, 1, 15, 23, 59, 59))
+    # Games4_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2026, 1, 16), end_date_range = datetime(2026, 1, 31, 23, 59, 59))
+    # Games5_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2026, 2, 1), end_date_range = datetime(2026, 3, 2, 23, 59, 59))
+    # Games6_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2026, 3, 3), end_date_range = datetime(today_dt.year, today_dt.month, today_dt.day - 1, 23, 59, 59))
     CleanGames_df = clean_team_game_stats(Games_json)
-    CleanGames2_df = clean_team_game_stats(Games2_json)
-    CleanGames3_df = clean_team_game_stats(Games3_json)
-    CleanGames4_df = clean_team_game_stats(Games4_json)
-    CleanGames5_df = clean_team_game_stats(Games5_json)
-    CleanGames6_df = clean_team_game_stats(Games6_json)
+    # CleanGames2_df = clean_team_game_stats(Games2_json)
+    # CleanGames3_df = clean_team_game_stats(Games3_json)
+    # CleanGames4_df = clean_team_game_stats(Games4_json)
+    # CleanGames5_df = clean_team_game_stats(Games5_json)
+    # CleanGames6_df = clean_team_game_stats(Games6_json)
     ### binding cleaned games together
     ### polars gives a warning that the is_in() (in the filter) part of the code below is deprecated (as of March 2, 2026 I'm on polars version 1.37.1) but it works and does what I want it to and everybody in the github issue it links to (https://github.com/pola-rs/polars/issues/22149) is mad that it would be producing an issue at all, given that the below usage of is_in() is what they all think would be the most common usage would be (and I agree) so hopefully it stays intact
     AllGamesStatAdj = pl.concat(
-        [CleanGames_df, CleanGames2_df, CleanGames3_df, CleanGames4_df, CleanGames5_df, CleanGames6_df], how = "vertical_relaxed").filter(
+        [AllGamesStatAdj, CleanGames_df], how = "vertical_relaxed").filter(
             (pl.col("team").is_in(VoAVariables['team']) & pl.col("opponent").is_in(VoAVariables['team']))
         ).with_columns(
             pl.when(pl.col('neutral_site') == True).then(0)
@@ -97,7 +98,7 @@ else:
             opp_points_per_poss = pl.col("opp_points_total") / pl.col("opp_possessions")
         )
     ### saving AllGamesStatAdj so I don't have to hit the API for every game every time I run the script
-    AllGamesStatAdj.write_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "GameStats", "MCBBD1VoA" + str(cbb_season) + "Games.csv"))
+    AllGamesStatAdj.write_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "GameStats", "MCBBD1VoA" + str(cbb_season) + "Games.parquet"))
     AllGamesPaceAdj = AllGamesStatAdj.group_by("game_id").first()
     
 
@@ -267,12 +268,12 @@ VoAVariables = VoAVariables.with_columns(
 # teams_master_df = teams_master_df.sort("adj_pace", descending=True)
 
 
-with pm.Model() as offensive_model:
+with pm.Model() as defensive_model:
     ### Priors for unknown model parameters
     ### using normal priors because I don't know how to use something else (more accurately, I don't know how to fix something else if it goes wrong or doesn't work)
     ## b0 is the intercept
     b0 = pm.Normal("b0", mu = 50, sigma = 5)
-    beta_def_oppppp = pm.Normal("beta_def_adjoffppp", mu = 2, sigma = 10)
+    beta_def_oppppp = pm.Normal("beta_def_adjdefppp", mu = 2, sigma = 10)
     beta_def_oppassists = pm.Normal("beta_def_assists", mu = 1, sigma = 10)
     beta_def_opptrueshooting = pm.Normal("beta_def_trueshooting", mu = 2.5, sigma = 10)
     beta_def_blocks = pm.Normal("beta_def_oppblocks", mu = -2, sigma = 5)
@@ -362,7 +363,7 @@ VoATable_Top25df = VoATable_df.filter(pl.col('OvrlVoARanking') <= 25)
 Top25_gt = (
     GT(VoATable_Top25df)
     .tab_header(
-        title = "MCBB D1 Vortex of Accuracy Ratings",
+        title = cbb_season_str + " MCBB D1 Vortex of Accuracy Top 25 Ratings",
         subtitle = "Supremely Excellent Yet Salaciously Godlike And Infallibly Magnificent Vortex of Accuracy"
     )
     # Formatting numbers (grouped by decimal count for efficiency)
@@ -405,29 +406,63 @@ Top25_gt = (
     .tab_source_note(
         source_note = "Table by @gshelor, Data from CBBD API"
     )
-    # .tab_options(
-    #     table_background_color="white",
-    #     table_font_names="Chivo", # or 'Arial'
-    #     table_font_color = "black",
-    #     table_font_color_light = "black",
-    #     table_border_top_style="none",
-    #     table_border_bottom_style="solid",
-    #     table_border_bottom_width="2px",
-    #     table_border_bottom_color="#222222",
-    #     column_labels_border_top_style="solid",
-    #     column_labels_border_top_width="3px",
-    #     column_labels_border_top_color="#222222",
-    #     column_labels_border_bottom_style="solid",
-    #     column_labels_border_bottom_width="1px",
-    #     column_labels_border_bottom_color="#222222",
-    #     row_striping_include_table_body = False,
-    #     row_striping_background_color= "#f0f0f0"   
-    # )
 )
 
-# Top25_gt.show()
-# # Display and Save
-# Top25_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + "Top25.png"))
+### saving Top 25 table
+Top25_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + "Top25Table.png"))
+
+### creating Full table using gt
+FullTable_gt = (
+    GT(VoATable_df)
+    .tab_header(
+        title = cbb_season_str + " MCBB D1 Vortex of Accuracy Ratings",
+        subtitle = "Supremely Excellent Yet Salaciously Godlike And Infallibly Magnificent Vortex of Accuracy"
+    )
+    # Formatting numbers (grouped by decimal count for efficiency)
+    .fmt_number(
+        columns = ["OvrlVoA_MeanRating", "OffVoA_MeanRating", "DefVoA_MeanRating"],
+        decimals = 3
+    )
+    .fmt_number(
+        columns=["OvrlVoARanking"],
+        decimals=0
+    )
+    .data_color(
+        columns = ["OvrlVoA_MeanRating", "OffVoA_MeanRating"],
+        palette = "RdYlGn",
+        na_color = "white",
+        ### this autocolor line was added because there's apparently a bug in great-tables?
+        ## stack overflow also suggested upgrading but I did that and nothing happened (I went from 0.18.0 to 0.21.0, same key error occured "'font_color_row_striping_background_color'")
+        # autocolor_text = False
+    )
+    .data_color(
+        columns = ["DefVoA_MeanRating"],
+        palette = "RdYlGn",
+        reverse = True,
+        na_color = "white",
+        ### turning off autocolor_text for same reason described above
+        # autocolor_text = False
+    )
+    # Column Labels
+    .cols_label(
+        OvrlVoA_MeanRating = "Overall VoA Rating",
+        OvrlVoARanking = "VoA Ranking",
+        OffVoA_MeanRating = "Off VoA Rating",
+        OffVoARanking = "Off Ranking",
+        DefVoA_MeanRating = "Def VoA Rating",
+        DefVoARanking = "Def Ranking"
+    )
+    # Hide columns
+    # .cols_hide(columns=["week", "VoA_Output"])
+    # Add Footnote
+    .tab_source_note(
+        source_note = "Table by @gshelor, Data from CBBD API"
+    )
+)
+
+FullTable_gt.show()
+### Display and Save
+FullTable_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + "FullTable.png"))
 
 ##### POOPYPANTS TESTING HERE #####
 # VoAVariables.write_csv(os.path.join(os.getcwd(), "poopypants.csv"))

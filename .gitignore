@@ -2,4 +2,4 @@
 *.pyo
 __pycache__/
 *.env
-*.parquet
+*.png

@@ -186,3 +186,15 @@ def opponent_adjustments(pace_df, full_df):
 
     ### returning full df of adjusted stats and team, which will be bound to VoAVariables in the VoA script
     return AdjStats_df
+
+### making a function for ad-hoc game projections (like when I'm going through the bracket seeing who VoA thinks would win but can't conventiently get game IDs from CBBD API)
+def game_projections(home_team, away_team, neutral):
+    voa_ratings = VoAVariables['OvrlVoA_MeanRating'].to_numpy()
+    voa_teams = VoAVariables['team'].to_numpy()
+    home_rating = voa_ratings[np.where(voa_teams == home_team)]
+    away_rating = voa_ratings[np.where(voa_teams == away_team)]
+    if neutral == True:
+        proj_margin = away_rating - home_rating
+    else:
+        proj_margin = away_rating - (home_rating + 3)
+    return proj_margin.item()
