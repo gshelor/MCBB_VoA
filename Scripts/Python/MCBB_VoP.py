@@ -31,12 +31,18 @@ else:
     ### for VoA ratings being made after January
     cbb_season = today_dt.year - 1
     cbb_season_str = str(today_dt.year - 1) + "/" + str(today_dt.year)
+### creating string of date combined together so I can identify unique projections compiled during the course of a season
+if today_dt.month >= 10:
+    datestring = str(today_dt.year) + str(today_dt.year + 1)
+else:
+    datestring = str(today_dt.year - 1 ) + str(today_dt.year) #+ str(today_dt.month) + str(today_dt.day)
 
 ### storing which iteration of the VoA this is for the season
 voa_num = input("Which release of the VoA most recently happened for this season? ")
+# vop_check = input("Is this the first time running the VoP script? (y/n) ")
 
 ### creating directory to store game projections if necessary
-if int(voa_num) == 1:
+if today_dt.month == 10:
     os.makedirs(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'Projections', 'CBBD'))
 else:
     print('projections directory should already exist')
@@ -54,11 +60,44 @@ gamesapi_instance = cbbd.GamesApi(api_client)
 ### loading games to be projected
 if today_dt.month == 10:
     print("preseason stuff goes here")
-    VoAVariables = os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + ".csv")
+    VoAVariables = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + ".csv"))
 else:
     ### loading upcoming week of games
-    VoAVariables = os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + ".csv")
+    VoAVariables = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + ".csv"))
     UpcomingGames = gamesapi_instance.get_games(start_date_range = today_dt, end_date_range = today_dt + timedelta(days = 7))
+    ### reading in csv of prior predictions to be bound to upcoming games df so I can save all predictions together in one csv
+    PriorPreds = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "Projections", "MCBBVoA" + datestring + "GameProjections.csv"), schema = {
+        'id': pl.Int64,
+        'source_id': pl.String,
+        'season_label': pl.String,
+        'season': pl.Int64,
+        'season_type': pl.String,
+        'start_date': pl.Datetime(time_unit='us', time_zone=None),
+        'start_time_tbd': pl.Boolean,
+        'neutral_site': pl.Boolean,
+        'conference_game': pl.Boolean,
+        'game_type': pl.String,
+        'tournament': pl.String,
+        'game_notes': pl.String,
+        'status': pl.String,
+        'home_team_id': pl.Int64,
+        'home_team': pl.String,
+        'home_conference_id': pl.Int64,
+        'home_conference': pl.String,
+        'home_seed': pl.Int64,
+        'away_team_id': pl.Int64,
+        'away_team': pl.String,
+        'away_conference_id': pl.Int64,
+        'away_conference': pl.String,
+        'away_seed': pl.Int64,
+        'venue_id': pl.Int64,
+        'venue': pl.String,
+        'city': pl.String,
+        'state': pl.String,
+        'home_rating': pl.Float64,
+        'away_rating': pl.Float64,
+        'proj_margin': pl.Float64,
+        'proj_winner': pl.String})
 
 
 ### converting API output to df
@@ -92,6 +131,7 @@ UpcomingGames_df = UpcomingGames_df.join(AwayVoARating, on = 'away_team', how = 
     .otherwise(pl.lit('TIE'))
 ).select(['id', 'source_id', 'season_label', 'season', 'season_type', 'start_date', 'start_time_tbd', 'neutral_site', 'conference_game', 'game_type', 'tournament', 'game_notes', 'status', 'home_team_id', 'home_team', 'home_conference_id', 'home_conference', 'home_seed', 'away_team_id', 'away_team', 'away_conference_id', 'away_conference', 'away_seed', 'venue_id', 'venue', 'city', 'state', 'home_rating', 'away_rating', 'proj_margin', 'proj_winner'])
 
+
 ### creating dataframe for cbbd submission
 CBBDSubmission_df = UpcomingGames_df.select(['id', 'home_team', 'away_team', 'proj_margin']).rename(
     {'id': 'id', 
@@ -100,10 +140,9 @@ CBBDSubmission_df = UpcomingGames_df.select(['id', 'home_team', 'away_team', 'pr
     'proj_margin': 'predicted'}
 )
 
-
-### creating string of date combined together so I can identify unique projections compiled during the course of a season
-datestring = str(today_dt.year) + str(today_dt.month) + str(today_dt.day)
-
 ##### Saving Projections as csvs #####
+### the upcoming games_df will contain multiple background info columns in case I want to go back and know more about the games later, the cbbd df only contains the columns necessary for aligning with the submission protocol for the CBBD pickem contest
+### binding upcoming games to prior preds before saving, taking most recent projection in case of duplicate game entries
+UpcomingGames_df = pl.concat([PriorPreds, UpcomingGames_df], how = 'diagonal').group_by("id").last()
 UpcomingGames_df.write_csv(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'Projections', 'MCBBVoA' + datestring + 'GameProjections.csv'))
-CBBDSubmission_df.write_csv(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'Projections', 'CBBD', 'MCBBVoA' + datestring + 'GameProjections.csv'))
+CBBDSubmission_df.write_csv(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'Projections', 'CBBD', 'MCBBVoACBBDGameProjections.csv'))
