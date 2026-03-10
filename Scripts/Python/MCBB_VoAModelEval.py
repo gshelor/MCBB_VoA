@@ -30,6 +30,7 @@ else:
     cbb_season = today_dt.year - 1
     cbb_season_str = str(today_dt.year - 1) + "/" + str(today_dt.year)
 
+### setting VoA number so the script knows which VoA csv to read in
 voa_num = input("Which release of the VoA is being evaluated for the season? ")
 
 
@@ -62,3 +63,14 @@ Lines_df = Lines_df.pivot(
 ).with_columns(
     mean_spread = pl.mean_horizontal(pl.selectors.starts_with("spread"), ignore_nulls = True)
 )
+
+##### POOPYPANTS TESTING, PLEASE IGNORE #####
+begin_date = datetime(2026, 1, 1)
+cur_date = begin_date
+
+end_date = datetime(2026, 3, 6)
+
+print(cur_date)
+while cur_date < end_date:
+    cur_date = cur_date + timedelta(weeks = 1)
+    print(cur_date)

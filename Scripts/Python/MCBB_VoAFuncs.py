@@ -198,3 +198,7 @@ def game_projections(home_team, away_team, neutral):
     else:
         proj_margin = away_rating - (home_rating + 3)
     return proj_margin.item()
+
+
+def get_clean_lines():
+    print("write this function, damnit")
