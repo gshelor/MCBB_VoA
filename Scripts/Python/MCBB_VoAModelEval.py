@@ -147,7 +147,15 @@ for i in eval_check:
             'home_rating': pl.Float64,
             'away_rating': pl.Float64,
             'proj_margin': pl.Float64,
-            'proj_winner': pl.String}) ### add new columns with their data types here
+            'proj_winner': pl.String,
+            'VoA_AE' : pl.Float64, 
+            'vegas_AE' : pl.Float64,
+            'VoA_SE' : pl.Float64,
+            'vegas_SE' : pl.Float64,
+            'VoA_correct_winner' : pl.Int32,
+            'vegas_correct_winner' : pl.Int32,
+            'VoA_ATS_winner' : pl.Int32,
+            'VoA_AEATS_winner' : pl.Int32}) ### add new columns with their data types here
     else:
         print("only input 'y' or 'n', no other characters, try again")
         break
@@ -209,7 +217,7 @@ else:
     ).with_columns(
         VoA_AEATS_winner = pl.when(pl.col('VoA_AE') < pl.col('vegas_AE')).then(1).otherwise(0)
     )
-    # CompletedGames = VoAGames.concat()
+    CompletedGames = pl.concat([CompletedGames, NewCompletedGames], how = 'vertical')
 
 ### creating season summary stats from completed games
 SeasonAccuracy = pl.DataFrame({
