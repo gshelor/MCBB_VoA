@@ -36,6 +36,11 @@ else:
 ### setting VoA number so the script knows which VoA csv to read in
 eval_check = input("Is this the first model eval of the season? (y/n) ")
 
+if eval_check == 'y':
+    os.makedirs(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'AccuracyMetrics'))
+else:
+    print("accuracy metrics directory should already exist")
+
 ### setting up a for loop so I can add a break statement at the end of the if statement
 for i in eval_check:
     if eval_check == 'y':
@@ -77,7 +82,72 @@ for i in eval_check:
         ## not summary csv with just accuracy metrics
         ### reading in a csv of games with accuracy metrics added, calling it VoAGames
         print("we'll add in the code here later")
-        # VoAGames = pl.read_csv()
+        ### reading in csv of prior predictions to be bound to upcoming games df so I can save all predictions together in one csv
+        GamePreds = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "Projections", "MCBBVoA" + datestring + "GameProjections.csv"), schema = {
+            'id': pl.Int64,
+            'source_id': pl.String,
+            'season_label': pl.String,
+            'season': pl.Int64,
+            'season_type': pl.String,
+            'start_date': pl.Datetime(time_unit='us', time_zone=None),
+            'start_time_tbd': pl.Boolean,
+            'neutral_site': pl.Boolean,
+            'conference_game': pl.Boolean,
+            'game_type': pl.String,
+            'tournament': pl.String,
+            'game_notes': pl.String,
+            'status': pl.String,
+            'home_team_id': pl.Int64,
+            'home_team': pl.String,
+            'home_conference_id': pl.Int64,
+            'home_conference': pl.String,
+            'home_seed': pl.Int64,
+            'away_team_id': pl.Int64,
+            'away_team': pl.String,
+            'away_conference_id': pl.Int64,
+            'away_conference': pl.String,
+            'away_seed': pl.Int64,
+            'venue_id': pl.Int64,
+            'venue': pl.String,
+            'city': pl.String,
+            'state': pl.String,
+            'home_rating': pl.Float64,
+            'away_rating': pl.Float64,
+            'proj_margin': pl.Float64,
+            'proj_winner': pl.String})
+        ### reading in csv of games for which accuracy/error metrics have already been calculated
+        VoAGames = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "Projections", "MCBBVoA" + datestring + "GameProjections.csv"), schema = {
+            'id': pl.Int64,
+            'source_id': pl.String,
+            'season_label': pl.String,
+            'season': pl.Int64,
+            'season_type': pl.String,
+            'start_date': pl.Datetime(time_unit='us', time_zone=None),
+            'start_time_tbd': pl.Boolean,
+            'neutral_site': pl.Boolean,
+            'conference_game': pl.Boolean,
+            'game_type': pl.String,
+            'tournament': pl.String,
+            'game_notes': pl.String,
+            'status': pl.String,
+            'home_team_id': pl.Int64,
+            'home_team': pl.String,
+            'home_conference_id': pl.Int64,
+            'home_conference': pl.String,
+            'home_seed': pl.Int64,
+            'away_team_id': pl.Int64,
+            'away_team': pl.String,
+            'away_conference_id': pl.Int64,
+            'away_conference': pl.String,
+            'away_seed': pl.Int64,
+            'venue_id': pl.Int64,
+            'venue': pl.String,
+            'city': pl.String,
+            'state': pl.String,
+            'home_rating': pl.Float64,
+            'away_rating': pl.Float64,
+            'proj_margin': pl.Float64,
+            'proj_winner': pl.String}) ### add new columns with their data types here
     else:
         print("only input 'y' or 'n', no other characters, try again")
         break
@@ -141,7 +211,7 @@ else:
     )
     # CompletedGames = VoAGames.concat()
 
-
+### creating season summary stats from completed games
 SeasonAccuracy = pl.DataFrame({
     'season' : datestring, 
     'games' : CompletedGames.height,
@@ -158,6 +228,9 @@ SeasonAccuracy = pl.DataFrame({
 }
 )
 
+### writing out csvs of accuracy metrics so I don't have to recalculate for each game
+CompletedGames.write_csv(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'AccuracyMetrics', 'VoACompletedGames' + str(cbb_season) + 'AccuracyMetrics.csv'))
+SeasonAccuracy.write_csv(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'AccuracyMetrics', 'VoA' + str(cbb_season) + 'SeasonAccuracyMetrics.csv'))
 
 
 
