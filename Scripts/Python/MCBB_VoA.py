@@ -416,7 +416,7 @@ FullTable_gt = (
     GT(VoATable_df)
     .tab_header(
         title = cbb_season_str + " MCBB D1 Vortex of Accuracy Ratings",
-        subtitle = "Supremely Excellent Yet Salaciously Godlike And Infallibly Magnificent Vortex of Accuracy"
+        subtitle = "Supremely Excellent Yet Salaciously Godlike And Infallibly Magnificent Vortex of Accuracy, " + str(today_dt.date())
     )
     # Formatting numbers (grouped by decimal count for efficiency)
     .fmt_number(

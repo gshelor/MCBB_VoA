@@ -200,5 +200,25 @@ def game_projections(home_team, away_team, neutral):
     return proj_margin.item()
 
 
-def get_clean_lines():
-    print("write this function, damnit")
+def get_clean_lines(lines_json, games_df):
+    ### converting lines object to a polars dataframe
+    Lines_df = pl.DataFrame(lines_json, strict = False)
+    ### the column that contains the actual lines for the games is a column of lists of "structs" so I take all the items out of the structs and make them their own column, then pivot so that games with multiple spreads will have multiple columns for each spread provider
+    Lines_df = Lines_df.explode('lines').unnest('lines')
+    ### pivoting so that each spread provider gets their own column, which I will then average since I don't gamble and thus have no clue whether one spread is going to be more reliable than another
+    Lines_df = Lines_df.pivot(
+        values=["spread", "over_under"],
+        index=["game_id", "season", "season_type", "start_date", "home_team_id", "home_team", "home_conference", "home_score", "away_team_id", "away_team", "away_conference", "away_score"], # game identifier
+        on="provider"
+    ).with_columns(
+        mean_spread = pl.mean_horizontal(pl.selectors.starts_with("spread"), ignore_nulls = True),
+        ### calculating actual margin, to be compared to mean_spread and VoA projection
+        ## away score minus home score because of how the CBBD API takes projections, so that's how I set up the VoA projections too
+        actual_margin = pl.col('away_score') - pl.col('home_score')
+    ).select(
+        ['game_id', 'home_score', 'away_score', 'mean_spread', 'actual_margin']
+    ).rename({'game_id': 'id'})
+
+    games_lines = games_df.join(Lines_df, on = 'id', how = 'left')
+
+    return games_lines

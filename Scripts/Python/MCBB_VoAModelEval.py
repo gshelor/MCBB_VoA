@@ -8,14 +8,12 @@ import matplotlib.pyplot as plt
 import seaborn as sbn
 from dotenv import load_dotenv
 from datetime import date, datetime
-# import cmdstanpy
-# import pymc as pm
-# import arviz as az
-# import preliz as pz
 # import json
 
 ### loading environmental variables (API token, so it's not directly printed in the code for security)
 load_dotenv()
+### reading in script of functions for cleaning VoA data
+exec(open(os.path.join(os.getcwd(), "Scripts", "Python", "MCBB_VoAFuncs.py")).read())
 
 ### storing values for season, month, day maybe, and which iteration of the VoA this is (for filenames, probably)
 ## cbb_season to be used as year/season input for team season stats grab from API
@@ -29,14 +27,65 @@ else:
     ### for VoA ratings being made after January
     cbb_season = today_dt.year - 1
     cbb_season_str = str(today_dt.year - 1) + "/" + str(today_dt.year)
+### creating string of date combined together so I can identify unique projections compiled during the course of a season
+if today_dt.month >= 10:
+    datestring = str(today_dt.year) + str(today_dt.year + 1)
+else:
+    datestring = str(today_dt.year - 1 ) + str(today_dt.year) #+ str(today_dt.month) + str(today_dt.day)
 
 ### setting VoA number so the script knows which VoA csv to read in
-voa_num = input("Which release of the VoA is being evaluated for the season? ")
+eval_check = input("Is this the first model eval of the season? (y/n) ")
+
+### setting up a for loop so I can add a break statement at the end of the if statement
+for i in eval_check:
+    if eval_check == 'y':
+        ### reading in csv of prior predictions to be bound to upcoming games df so I can save all predictions together in one csv
+        GamePreds = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "Projections", "MCBBVoA" + datestring + "GameProjections.csv"), schema = {
+            'id': pl.Int64,
+            'source_id': pl.String,
+            'season_label': pl.String,
+            'season': pl.Int64,
+            'season_type': pl.String,
+            'start_date': pl.Datetime(time_unit='us', time_zone=None),
+            'start_time_tbd': pl.Boolean,
+            'neutral_site': pl.Boolean,
+            'conference_game': pl.Boolean,
+            'game_type': pl.String,
+            'tournament': pl.String,
+            'game_notes': pl.String,
+            'status': pl.String,
+            'home_team_id': pl.Int64,
+            'home_team': pl.String,
+            'home_conference_id': pl.Int64,
+            'home_conference': pl.String,
+            'home_seed': pl.Int64,
+            'away_team_id': pl.Int64,
+            'away_team': pl.String,
+            'away_conference_id': pl.Int64,
+            'away_conference': pl.String,
+            'away_seed': pl.Int64,
+            'venue_id': pl.Int64,
+            'venue': pl.String,
+            'city': pl.String,
+            'state': pl.String,
+            'home_rating': pl.Float64,
+            'away_rating': pl.Float64,
+            'proj_margin': pl.Float64,
+            'proj_winner': pl.String})
+    elif eval_check == 'n':
+        ### previously saved df with games, margins, and accuracy metrics for each game will be read in here
+        ## not summary csv with just accuracy metrics
+        ### reading in a csv of games with accuracy metrics added, calling it VoAGames
+        print("we'll add in the code here later")
+        # VoAGames = pl.read_csv()
+    else:
+        print("only input 'y' or 'n', no other characters, try again")
+        break
 
 
 ### setting up API configuration
 configuration = cbbd.Configuration(
-    host="https://api.collegebasketballdata.com", 
+    host = "https://api.collegebasketballdata.com", 
     access_token = os.getenv("CBB_TOKEN"))
 api_client = cbbd.ApiClient(configuration)
 
@@ -44,33 +93,76 @@ api_client = cbbd.ApiClient(configuration)
 linesapi_instance = cbbd.LinesApi(api_client)
 
 ### getting games from relevant time period
-if today_dt.month == 10 or today_dt.month == 11:
-    Lines_json = linesapi_instance.get_lines(start_date_range = datetime(2025, 10, 1), end_date_range = datetime(2026, 2, 15))
+if eval_check == 'y':
+    Lines_json = linesapi_instance.get_lines(start_date_range = GamePreds['start_date'].min(), end_date_range = GamePreds['start_date'].max())
+    ### cleaning API output to turn it into something useful
+    CompletedGames = get_clean_lines(lines_json = Lines_json, games_df = GamePreds).with_columns(
+        VoA_AE = (pl.col('actual_margin') - pl.col('proj_margin')).abs(),
+        vegas_AE = (pl.col('actual_margin') - pl.col('mean_spread')).abs(),
+        VoA_SE = (pl.col('actual_margin') - pl.col('proj_margin')).pow(2),
+        vegas_SE = (pl.col('actual_margin') - pl.col('mean_spread')).pow(2),
+        VoA_correct_winner = pl.when(
+            ((pl.col('proj_margin') < 0) & (pl.col('actual_margin') < 0)) | 
+            ((pl.col('proj_margin') > 0) & (pl.col('actual_margin') > 0))).then(1)
+            .otherwise(0),
+        vegas_correct_winner = pl.when(
+            ((pl.col('actual_margin') < 0) & (pl.col('mean_spread') < 0)) | 
+            ((pl.col('actual_margin') > 0) & (pl.col('mean_spread') > 0))).then(1)
+            .otherwise(0),
+        VoA_ATS_winner = pl.when(
+            ((pl.col('proj_margin') < pl.col('mean_spread')) & (pl.col('actual_margin') < pl.col('mean_spread'))) |
+            ((pl.col('proj_margin') > pl.col('mean_spread')) & (pl.col('actual_margin') > pl.col('mean_spread')))).then(1)
+        .otherwise(0)
+    ).with_columns(
+        VoA_AEATS_winner = pl.when(pl.col('VoA_AE') < pl.col('vegas_AE')).then(1).otherwise(0)
+    )
 else:
-    Lines_json = linesapi_instance.get_lines(start_date_range = datetime(2025, 10, 1), end_date_range = datetime(2026, 2, 15))
+    Lines_json = linesapi_instance.get_lines(start_date_range = VoAGames['start_date'].max(), end_date_range = GamePreds['start_date'].max())
+    ### cleaning API output to turn it into something useful
+    NewCompletedGames = get_clean_lines(lines_json = Lines_json, games_df = GamePreds).with_columns(
+        VoA_AE = (pl.col('actual_margin') - pl.col('proj_margin')).abs(),
+        vegas_AE = (pl.col('actual_margin') - pl.col('mean_spread')).abs(),
+        VoA_SE = (pl.col('actual_margin') - pl.col('proj_margin')).pow(2),
+        vegas_SE = (pl.col('actual_margin') - pl.col('mean_spread')).pow(2),
+        VoA_correct_winner = pl.when(
+            ((pl.col('proj_margin') < 0) & (pl.col('actual_margin') < 0)) | 
+            ((pl.col('proj_margin') > 0) & (pl.col('actual_margin') > 0))).then(1)
+            .otherwise(0),
+        vegas_correct_winner = pl.when(
+            ((pl.col('actual_margin') < 0) & (pl.col('mean_spread') < 0)) | 
+            ((pl.col('actual_margin') > 0) & (pl.col('mean_spread') > 0))).then(1)
+            .otherwise(0),
+        VoA_ATS_winner = pl.when(
+            ((pl.col('proj_margin') < pl.col('mean_spread')) & (pl.col('actual_margin') < pl.col('mean_spread'))) |
+            ((pl.col('proj_margin') > pl.col('mean_spread')) & (pl.col('actual_margin') > pl.col('mean_spread')))).then(1)
+        .otherwise(0)
+    ).with_columns(
+        VoA_AEATS_winner = pl.when(pl.col('VoA_AE') < pl.col('vegas_AE')).then(1).otherwise(0)
+    )
+    # CompletedGames = VoAGames.concat()
 
 
-
-Lines_df = pl.DataFrame(Lines_json, strict = False)
-
-### the column that contains the actual lines for the games is a column of lists of "structs" so I take all the items out of the structs and make them their own column, then pivot so that games with multiple spreads will have multiple columns for each spread provider
-Lines_df = Lines_df.explode('lines').unnest('lines')
-
-Lines_df = Lines_df.pivot(
-    values=["spread", "over_under"],
-    index=["game_id", "season", "season_type", "start_date", "home_team_id", "home_team", "home_conference", "home_score", "away_team_id", "away_team", "away_conference", "away_score"], # game identifier
-    on="provider"
-).with_columns(
-    mean_spread = pl.mean_horizontal(pl.selectors.starts_with("spread"), ignore_nulls = True)
+SeasonAccuracy = pl.DataFrame({
+    'season' : datestring, 
+    'games' : CompletedGames.height,
+    'VoA_MAE' : CompletedGames['VoA_AE'].mean(),
+    'vegas_MAE' : CompletedGames['vegas_AE'].mean(),
+    'VoA_MSE' : CompletedGames['VoA_SE'].mean(),
+    'vegas_MSE' : CompletedGames['vegas_SE'].mean(),
+    'VoA_RMSE' : np.sqrt(CompletedGames['VoA_SE'].mean()),
+    'vegas_RMSE' : np.sqrt(CompletedGames['vegas_SE'].mean()),
+    'VoA_win_pct' : CompletedGames['VoA_correct_winner'].mean(),
+    'vegas_win_pct' : CompletedGames['vegas_correct_winner'].mean(),
+    'VoA_ATS_win_pct' : CompletedGames['VoA_ATS_winner'].mean(),
+    'VoA_AEATS_win_pct' : CompletedGames['VoA_AEATS_winner'].mean()
+}
 )
 
+
+
+
+
+
+
+
 ##### POOPYPANTS TESTING, PLEASE IGNORE #####
-begin_date = datetime(2026, 1, 1)
-cur_date = begin_date
-
-end_date = datetime(2026, 3, 6)
-
-print(cur_date)
-while cur_date < end_date:
-    cur_date = cur_date + timedelta(weeks = 1)
-    print(cur_date)
