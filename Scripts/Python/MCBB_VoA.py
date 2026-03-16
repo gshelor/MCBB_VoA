@@ -17,7 +17,7 @@ import arviz as az
 import preliz as pz
 import statsmodels.formula.api as smf
 import random
-from great_tables import GT, style, loc, google_font
+from great_tables import GT
 import selenium
 # import sportsdataverse
 # import json
@@ -89,7 +89,11 @@ else:
     AllGamesStatAdj = pl.concat(
         [AllGamesStatAdj, CleanGames_df], how = "vertical_relaxed").filter(
             (pl.col("team").is_in(VoAVariables['team']) & pl.col("opponent").is_in(VoAVariables['team']))
-        ).with_columns(
+        )
+    ### saving AllGamesStatAdj so I don't have to hit the API for every game every time I run the script
+    AllGamesStatAdj.write_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "GameStats", "MCBBD1VoA" + str(cbb_season) + "Games.parquet"))
+    ### Adding new columns now that I've saved it so new games can be added to the df
+    AllGamesStatAdj = AllGamesStatAdj.with_columns(
             pl.when(pl.col('neutral_site') == True).then(0)
             .when(pl.col('neutral_site') == False, pl.col('is_home') == True).then(1)
             .otherwise(-1)
@@ -97,8 +101,6 @@ else:
             points_per_poss = pl.col("points_total") / pl.col("possessions"),
             opp_points_per_poss = pl.col("opp_points_total") / pl.col("opp_possessions")
         )
-    ### saving AllGamesStatAdj so I don't have to hit the API for every game every time I run the script
-    AllGamesStatAdj.write_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "GameStats", "MCBBD1VoA" + str(cbb_season) + "Games.parquet"))
     AllGamesPaceAdj = AllGamesStatAdj.group_by("game_id").first()
     
 
@@ -124,6 +126,7 @@ else:
 ##### Fitting model to create opponent-adjusted team strength ratings for offense and defense #####
 ### Offensive Model
 ## offensive stats that received opponent adjustments: ["assists", "true_shooting", "opp_blocks", "opp_steals", "field_goals_pct", "two_point_field_goals_pct", "three_point_field_goals_pct", "free_throws_pct", "rebounds_offensive", "turnovers_total", "points_fast_break", "points_off_turnovers", "points_in_paint", "points_per_poss"]
+modelstarttime = datetime.now()
 with pm.Model() as offensive_model:
     ### Priors for unknown model parameters
     ### using normal priors because I don't know how to use something else (more accurately, I don't know how to fix something else if it goes wrong or doesn't work)
@@ -186,8 +189,8 @@ posterior_preds = idata.posterior_predictive["Y_obs"].stack(sample=("chain", "dr
 VoAVariables = VoAVariables.with_columns(
     OffVoA_MeanRating = posterior_preds.mean(axis=1),
     OffVoA_MedRating = np.median(posterior_preds, axis=1),
-    OffVoA_95PctRating = np.percentile(posterior_preds, 97.5, axis=1),
-    OffVoA_05PctRating = np.percentile(posterior_preds, 2.5, axis=1),
+    OffVoA_975PctRating = np.percentile(posterior_preds, 97.5, axis=1),
+    OffVoA_025PctRating = np.percentile(posterior_preds, 2.5, axis=1),
     OffVoA_SD = np.std(posterior_preds, axis = 1))
 
 ### what if stan, instead of pymc
@@ -330,16 +333,16 @@ posterior_preds = idata.posterior_predictive["Y_obs"].stack(sample=("chain", "dr
 VoAVariables = VoAVariables.with_columns(
     DefVoA_MeanRating = posterior_preds.mean(axis=1),
     DefVoA_MedRating = np.median(posterior_preds, axis=1),
-    DefVoA_95PctRating = np.percentile(posterior_preds, 97.5, axis=1),
-    DefVoA_05PctRating = np.percentile(posterior_preds, 2.5, axis=1),
+    DefVoA_975PctRating = np.percentile(posterior_preds, 97.5, axis=1),
+    DefVoA_025PctRating = np.percentile(posterior_preds, 2.5, axis=1),
     DefVoA_SD = np.std(posterior_preds, axis = 1))
 
 ### Calculating Overall Rating by subtracting defensive rating from overall rating
 ## accidentally mislabled
 VoAVariables = VoAVariables.with_columns(
     OvrlVoA_MeanRating = pl.col('OffVoA_MeanRating') - pl.col('DefVoA_MeanRating'),
-    OvrlVoA_975pctRating = pl.col('OffVoA_95PctRating') - pl.col('DefVoA_95PctRating'),
-    OvrlVoA_025pctRating = pl.col('OffVoA_05PctRating') - pl.col('DefVoA_05PctRating')
+    OvrlVoA_975pctRating = pl.col('OffVoA_975PctRating') - pl.col('DefVoA_975PctRating'),
+    OvrlVoA_025pctRating = pl.col('OffVoA_025PctRating') - pl.col('DefVoA_025PctRating')
 )
 
 ### Creating Ranking Columns for the overall, offensive, and defensive mean ratings
@@ -364,7 +367,7 @@ Top25_gt = (
     GT(VoATable_Top25df)
     .tab_header(
         title = cbb_season_str + " MCBB D1 Vortex of Accuracy Top 25 Ratings",
-        subtitle = "Supremely Excellent Yet Salaciously Godlike And Infallibly Magnificent Vortex of Accuracy"
+        subtitle = "Supremely Excellent Yet Salaciously Godlike And Infallibly Magnificent Vortex of Accuracy, " + str(today_dt.date())
     )
     # Formatting numbers (grouped by decimal count for efficiency)
     .fmt_number(

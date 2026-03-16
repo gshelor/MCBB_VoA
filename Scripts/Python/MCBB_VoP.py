@@ -146,3 +146,62 @@ CBBDSubmission_df = UpcomingGames_df.select(['id', 'home_team', 'away_team', 'pr
 UpcomingGames_df = pl.concat([PriorPreds, UpcomingGames_df], how = 'diagonal').group_by("id").last()
 UpcomingGames_df.write_csv(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'Projections', 'MCBBVoA' + datestring + 'GameProjections.csv'))
 CBBDSubmission_df.write_csv(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'Projections', 'CBBD', 'MCBBVoACBBDGameProjections.csv'))
+
+
+##### Making table showing games and projected margins #####
+### selecting columns to be shown in gt table
+UpcomingGamesTable_df = UpcomingGames_df.filter(
+    (pl.col('start_date') > today_dt)).select(
+        ['tournament', 'home_team', 'home_rating', 'away_team', 'away_rating', 'proj_margin', 'proj_winner']).with_columns(
+            proj_margin_abs = pl.col('proj_margin').abs())#.sort('proj_margin_abs', descending = True)
+### creating Full table using gt
+GamesTable_gt = (
+    GT(UpcomingGamesTable_df)
+    .tab_header(
+        title = cbb_season_str + " MCBB D1 Vortex of Accuracy Upcoming Games",
+        subtitle = "The Unquestionably Puzzling Yet Impeccibly Perceptive Vortex of Projection, " + str(today_dt.date()) + ' - ' + str((today_dt + timedelta(days = 7)).date())
+    )
+    # Formatting numbers (grouped by decimal count for efficiency)
+    .fmt_number(
+        columns = ["home_rating", "away_rating"],
+        decimals = 3
+    )
+    .fmt_number(
+        columns=["proj_margin_abs"],
+        decimals = 1
+    )
+    .data_color(
+        columns = ['proj_margin_abs'],
+        palette = "RdBu",
+        na_color = "white",
+        ### this autocolor line was added because there's apparently a bug in great-tables?
+        ## stack overflow also suggested upgrading but I did that and nothing happened (I went from 0.18.0 to 0.21.0, same key error occured "'font_color_row_striping_background_color'")
+        # autocolor_text = False
+    )
+    # .data_color(
+    #     columns = ["DefVoA_MeanRating"],
+    #     palette = "RdYlGn",
+    #     reverse = True,
+    #     na_color = "white",
+    #     ### turning off autocolor_text for same reason described above
+    #     # autocolor_text = False
+    # )
+    # Column Labels
+    .cols_label(
+        tournament = "Tournament",
+        home_team = "Home Team",
+        home_rating = "Home VoA Rating",
+        away_team = "Away Team",
+        away_rating = "Away VoA Rating",
+        proj_margin_abs = "Projected Margin",
+        proj_winner = "Projected Winner"
+    )
+    # Hide columns
+    .cols_hide(columns=['proj_margin'])
+    # Add Footnote
+    .tab_source_note(
+        source_note = "Table by @gshelor, Data from CBBD API"
+    )
+)
+
+GamesTable_gt.show()
