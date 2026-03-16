@@ -474,3 +474,11 @@ FullTable_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_se
 
 # poopypants.tail(10)
 # poopypants.head(10)
+
+# poopypants = VoAVariables.with_columns(
+#     pts_per_100_poss = pl.col('adjoff_points_per_poss') * 100,
+#     opppts_per_100_poss = pl.col('adjdef_opp_points_per_poss') * 100
+# ).with_columns(
+#     adj_ppg_diff = pl.col('adjoff_ppg') - pl.col('adjdef_ppg'),
+#     pts_per_100_poss_diff = pl.col('pts_per_100_poss') - pl.col('opppts_per_100_poss')
+# ).select(['team', 'OvrlVoARanking', 'OvrlVoA_MeanRating', 'adj_ppg_diff', 'pts_per_100_poss_diff', 'OffVoA_MeanRating', 'pts_per_100_poss', 'adjoff_ppg', 'DefVoA_MeanRating', 'opppts_per_100_poss', 'adjdef_ppg'])
