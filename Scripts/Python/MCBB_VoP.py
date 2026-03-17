@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import seaborn as sbn
 from dotenv import load_dotenv
 from datetime import date, datetime, timedelta
+from great_tables import GT
 # import cmdstanpy
 # import pymc as pm
 # import arviz as az
