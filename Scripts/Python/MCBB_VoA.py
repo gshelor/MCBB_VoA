@@ -352,6 +352,8 @@ VoAVariables = VoAVariables.with_columns(
     DefVoARanking = pl.col('DefVoA_MeanRating').rank(method = "dense", descending = False),
 )
 
+modelendtime = datetime.now()
+
 
 ##### Saving VoAVariables and creating output tables #####
 ### Saving final VoA csv
@@ -482,3 +484,5 @@ FullTable_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_se
 #     adj_ppg_diff = pl.col('adjoff_ppg') - pl.col('adjdef_ppg'),
 #     pts_per_100_poss_diff = pl.col('pts_per_100_poss') - pl.col('opppts_per_100_poss')
 # ).select(['team', 'OvrlVoARanking', 'OvrlVoA_MeanRating', 'adj_ppg_diff', 'pts_per_100_poss_diff', 'OffVoA_MeanRating', 'pts_per_100_poss', 'adjoff_ppg', 'DefVoA_MeanRating', 'opppts_per_100_poss', 'adjdef_ppg'])
+
+print(modelendtime - modelstarttime)

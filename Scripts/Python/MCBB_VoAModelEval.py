@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sbn
 from dotenv import load_dotenv
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 # import json
 
 ### loading environmental variables (API token, so it's not directly printed in the code for security)
@@ -19,6 +19,7 @@ exec(open(os.path.join(os.getcwd(), "Scripts", "Python", "MCBB_VoAFuncs.py")).re
 ## cbb_season to be used as year/season input for team season stats grab from API
 ### Today's date
 today_dt = datetime.now()
+prevday_dt = today_dt - timedelta(days = 1)
 if today_dt.month >= 5:
     ### for preseason ratings and ratings from November-December of current season
     cbb_season = today_dt.year
@@ -116,7 +117,7 @@ for i in eval_check:
             'proj_margin': pl.Float64,
             'proj_winner': pl.String})
         ### reading in csv of games for which accuracy/error metrics have already been calculated
-        VoAGames = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "Projections", "MCBBVoA" + datestring + "GameProjections.csv"), schema = {
+        VoAGames = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "AccuracyMetrics", "VoACompletedGames" + str(cbb_season) + "AccuracyMetrics.csv"), schema = {
             'id': pl.Int64,
             'source_id': pl.String,
             'season_label': pl.String,
@@ -148,6 +149,10 @@ for i in eval_check:
             'away_rating': pl.Float64,
             'proj_margin': pl.Float64,
             'proj_winner': pl.String,
+            'home_score': pl.Int64,
+            'away_score': pl.Int64,
+            'mean_spread': pl.Float64,
+            'actual_margin': pl.Int64,
             'VoA_AE' : pl.Float64, 
             'vegas_AE' : pl.Float64,
             'VoA_SE' : pl.Float64,
@@ -155,7 +160,9 @@ for i in eval_check:
             'VoA_correct_winner' : pl.Int32,
             'vegas_correct_winner' : pl.Int32,
             'VoA_ATS_winner' : pl.Int32,
-            'VoA_AEATS_winner' : pl.Int32}) ### add new columns with their data types here
+            'VoA_AEATS_winner' : pl.Int32})
+        ### filtering predicition df so that games only games without accuracy metrics are evaluated in this script
+        CompletedGames = GamePreds.join(VoAGames, on = 'id', how = 'anti')
     else:
         print("only input 'y' or 'n', no other characters, try again")
         break
@@ -197,7 +204,7 @@ if eval_check == 'y':
 else:
     Lines_json = linesapi_instance.get_lines(start_date_range = VoAGames['start_date'].max(), end_date_range = GamePreds['start_date'].max())
     ### cleaning API output to turn it into something useful
-    NewCompletedGames = get_clean_lines(lines_json = Lines_json, games_df = GamePreds).with_columns(
+    NewCompletedGames = get_clean_lines(lines_json = Lines_json, games_df = CompletedGames).with_columns(
         VoA_AE = (pl.col('actual_margin') - pl.col('proj_margin')).abs(),
         vegas_AE = (pl.col('actual_margin') - pl.col('mean_spread')).abs(),
         VoA_SE = (pl.col('actual_margin') - pl.col('proj_margin')).pow(2),
@@ -217,7 +224,7 @@ else:
     ).with_columns(
         VoA_AEATS_winner = pl.when(pl.col('VoA_AE') < pl.col('vegas_AE')).then(1).otherwise(0)
     )
-    CompletedGames = pl.concat([CompletedGames, NewCompletedGames], how = 'vertical')
+    CompletedGames = pl.concat([VoAGames, NewCompletedGames], how = 'vertical').filter(pl.col('actual_margin') != 0).filter(pl.col('start_date') <= datetime(prevday_dt.year, prevday_dt.month, prevday_dt.day, 23, 59, 59))
 
 ### creating season summary stats from completed games
 SeasonAccuracy = pl.DataFrame({
