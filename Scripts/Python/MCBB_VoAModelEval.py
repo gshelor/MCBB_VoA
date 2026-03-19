@@ -82,7 +82,6 @@ for i in eval_check:
         ### previously saved df with games, margins, and accuracy metrics for each game will be read in here
         ## not summary csv with just accuracy metrics
         ### reading in a csv of games with accuracy metrics added, calling it VoAGames
-        print("we'll add in the code here later")
         ### reading in csv of prior predictions to be bound to upcoming games df so I can save all predictions together in one csv
         GamePreds = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "Projections", "MCBBVoA" + datestring + "GameProjections.csv"), schema = {
             'id': pl.Int64,
