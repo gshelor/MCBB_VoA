@@ -259,3 +259,4 @@ GamesTable_sorted_gt = (
 ### displaying tables
 GamesTable_gt.show()
 GamesTable_sorted_gt.show()
+GamesTable_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_season), "MCBBVoACurrentProjections.png"))
