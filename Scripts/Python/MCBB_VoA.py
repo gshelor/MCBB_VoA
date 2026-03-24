@@ -414,7 +414,7 @@ Top25_gt = (
 )
 
 ### saving Top 25 table
-Top25_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + "Top25Table.png"))
+Top25_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoATop25Table.png"))
 
 ### creating Full table using gt
 FullTable_gt = (
@@ -467,7 +467,7 @@ FullTable_gt = (
 
 FullTable_gt.show()
 ### Display and Save
-FullTable_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + "FullTable.png"))
+FullTable_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoAFullTable.png"))
 
 ##### POOPYPANTS TESTING HERE #####
 # VoAVariables.write_csv(os.path.join(os.getcwd(), "poopypants.csv"))
