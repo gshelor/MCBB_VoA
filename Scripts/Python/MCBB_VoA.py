@@ -172,8 +172,8 @@ with pm.Model() as offensive_model:
 
     ### Fit the Model (MCMC Sampling)
     idata = pm.sample(
-        draws = 10000, 
-        tune = 3000, 
+        draws = 7500, 
+        tune = 2500, 
         chains = 3, 
         random_seed = 802,
         cores = os.cpu_count() // 2
@@ -316,8 +316,8 @@ with pm.Model() as defensive_model:
 
     ### Fit the Model (MCMC Sampling)
     idata = pm.sample(
-        draws = 10000, 
-        tune = 3000, 
+        draws = 7500, 
+        tune = 2500, 
         chains = 3, 
         random_seed = 802,
         cores = os.cpu_count() // 2
