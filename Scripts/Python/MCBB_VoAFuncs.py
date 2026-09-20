@@ -11,6 +11,8 @@ import pandas as pd
 import numpy as np
 import random
 import statsmodels.formula.api as smf
+# import bambi as bmb
+from pymer4.models import lmer
 
 ##### Function for cleaning season team stats API output #####
 def clean_season_stats(json_obj):
@@ -90,7 +92,7 @@ def clean_team_game_stats(json_obj):
     ### returning FinalGames_df
     return FinalGames_df
 
-
+##### Function for calculating opponent and conference-adjusted stats #####
 def opponent_adjustments(pace_df, full_df):
     ### just gonna stick all the opponent-adjustments here
     ### Pace opponent adjustments
@@ -129,24 +131,18 @@ def opponent_adjustments(pace_df, full_df):
         ### setting random seed
         random.seed(802)
         ### specifying formula, group effects, variance components
-        oppadj_model = smf.mixedlm(formula = f"{i} ~ hfa", data = full_df.to_pandas(), groups = full_df['team'], vc_formula={"opponent": "1 + C(opponent)"})
+        oppadj_model = lmer(formula = f"{i} ~ hfa + (1 | conference/team) + (1 | opponent_conference/opponent)", data = full_df)
         ### fitting model
         ## For future: weight games by their time since current date, so more recent games are weighted more heavily than others
-        oppadj_fit = oppadj_model.fit()
+        oppadj_model.fit()
         # oppadj_fit.summary()
         ### Extract adjustments and join to VoAVariables using polars and pandas (ugh)
-        ### extracting intercept
-        intercept = oppadj_fit.params['Intercept']
-
-        ### Extract adjusted coefficients and apply them to intercept to get adjusted metric
-        team_coefs = [
-            {"team": team_name, "adj_coef": float(effect.iloc[0])} 
-            for team_name, effect in oppadj_fit.random_effects.items()
-        ]
-        ### calculating opponent-adjusted pace
-        adj_df = pl.DataFrame(team_coefs).with_columns(
-            (pl.col("adj_coef") + intercept).alias(new_colname)
-        ).select(['team', new_colname])
+        ### making predictions (predictions are the adjusted value, will be aggregated to get a mean over the course of a season)
+        adj_df = full_df.with_columns(
+            oppadj_model.predict(full_df).alias("adj_stat")
+        ).group_by("team").agg(
+            pl.col("adj_stat").mean().alias(new_colname)
+        )
 
         ### appending df of team names and opp-adjusted stats to the list above
         adj_dflist.append(adj_df)
@@ -159,23 +155,18 @@ def opponent_adjustments(pace_df, full_df):
         ### setting random seed
         random.seed(802)
         ### specifying formula, group effects, variance components
-        oppadj_model = smf.mixedlm(formula = f"{i} ~ hfa", data = full_df.to_pandas(), groups = full_df['team'], vc_formula={"opponent": "1 + C(opponent)"})
+        oppadj_model = lmer(formula = f"{i} ~ hfa + (1 | conference/team) + (1 | opponent_conference/opponent)", data = full_df)
         ### fitting model
-        oppadj_fit = oppadj_model.fit()
+        ## For future: weight games by their time since current date, so more recent games are weighted more heavily than others
+        oppadj_model.fit()
         # oppadj_fit.summary()
         ### Extract adjustments and join to VoAVariables using polars and pandas (ugh)
-        ### extracting intercept
-        intercept = oppadj_fit.params['Intercept']
-
-        ### Extract adjusted coefficients and add them to intercept to get adjusted metric
-        team_coefs = [
-            {"team": team_name, "adj_coef": float(effect.iloc[0])} 
-            for team_name, effect in oppadj_fit.random_effects.items()
-        ]
-        ### calculating opponent-adjusted pace
-        adj_df = pl.DataFrame(team_coefs).with_columns(
-            (pl.col("adj_coef") + intercept).alias(new_colname)
-        ).select(['team', new_colname])
+        ### making predictions (predictions are the adjusted value, will be aggregated to get a mean over the course of a season)
+        adj_df = full_df.with_columns(
+            oppadj_model.predict(full_df).alias("adj_stat")
+        ).group_by("team").agg(
+            pl.col("adj_stat").mean().alias(new_colname)
+        )
 
         ### appending df of team names and opp-adjusted stats to the list above
         adj_dflist.append(adj_df)
