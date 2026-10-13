@@ -71,3 +71,6 @@ test_df = Games_df.with_columns(
     mean_lme_fg_pct = pl.col("lme_fg_pct").mean(),
     mean_smf_fg_pct = pl.col("smf_fg_pct").mean()
 )
+
+
+# poopypants2 = voa_train_to_stats("_PY1", VoATrain_PY1)

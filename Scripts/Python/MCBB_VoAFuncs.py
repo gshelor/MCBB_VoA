@@ -5,6 +5,7 @@
 
 ### importing some modules
 ## these should honestly already be imported based on how I intend to use this script but here they are for redundancy or whatever I guess
+from pytensor.graph.basic import op_as_string
 import cbbd
 import polars as pl
 import pandas as pd
@@ -103,7 +104,7 @@ def opponent_adjustments(pace_df, full_df):
     ## For future: weight games by their time since current date, so more recent games are weighted more heavily than others
     pace_oppadj_fit = pace_oppadj_model.fit()
     # pace_oppadj_fit.summary()
-    ### Extract adjustments and join to VoAVariables using polars and pandas (ugh)
+    ### Extract adjustments and join to VoAStats using polars and pandas (ugh)
     ### extracting intercept
     pace_intercept = pace_oppadj_fit.params['Intercept']
 
@@ -136,10 +137,11 @@ def opponent_adjustments(pace_df, full_df):
         ## For future: weight games by their time since current date, so more recent games are weighted more heavily than others
         oppadj_model.fit()
         # oppadj_fit.summary()
-        ### Extract adjustments and join to VoAVariables using polars and pandas (ugh)
+        ### Extract adjustments and join to VoAStats using polars and pandas (ugh)
         ### making predictions (predictions are the adjusted value, will be aggregated to get a mean over the course of a season)
+        adj_preds = oppadj_model.predict(full_df)
         adj_df = full_df.with_columns(
-            oppadj_model.predict(full_df).alias("adj_stat")
+            adj_stat = adj_preds
         ).group_by("team").agg(
             pl.col("adj_stat").mean().alias(new_colname)
         )
@@ -160,10 +162,11 @@ def opponent_adjustments(pace_df, full_df):
         ## For future: weight games by their time since current date, so more recent games are weighted more heavily than others
         oppadj_model.fit()
         # oppadj_fit.summary()
-        ### Extract adjustments and join to VoAVariables using polars and pandas (ugh)
+        ### Extract adjustments and join to VoAStats using polars and pandas (ugh)
         ### making predictions (predictions are the adjusted value, will be aggregated to get a mean over the course of a season)
+        adj_preds = oppadj_model.predict(full_df)
         adj_df = full_df.with_columns(
-            oppadj_model.predict(full_df).alias("adj_stat")
+            adj_stat = adj_preds
         ).group_by("team").agg(
             pl.col("adj_stat").mean().alias(new_colname)
         )
@@ -175,13 +178,13 @@ def opponent_adjustments(pace_df, full_df):
     for x in np.arange(0, len(adj_dflist)):
         AdjStats_df = AdjStats_df.join(adj_dflist[x], on = "team")
 
-    ### returning full df of adjusted stats and team, which will be bound to VoAVariables in the VoA script
+    ### returning full df of adjusted stats and team, which will be bound to VoAStats in the VoA script
     return AdjStats_df
 
 ### making a function for ad-hoc game projections (like when I'm going through the bracket seeing who VoA thinks would win but can't conventiently get game IDs from CBBD API)
 def game_projections(home_team, away_team, neutral):
-    voa_ratings = VoAVariables['OvrlVoA_MeanRating'].to_numpy()
-    voa_teams = VoAVariables['team'].to_numpy()
+    voa_ratings = VoAStats['OvrlVoA_MeanRating'].to_numpy()
+    voa_teams = VoAStats['team'].to_numpy()
     home_rating = voa_ratings[np.where(voa_teams == home_team)]
     away_rating = voa_ratings[np.where(voa_teams == away_team)]
     if neutral == True:
@@ -213,3 +216,73 @@ def get_clean_lines(lines_json, games_df):
     games_lines = games_df.join(Lines_df, on = 'id', how = 'left')
 
     return games_lines
+
+
+##### function to get game data from full previous seasons #####
+def get_PY_game_data(season_num):
+    Games_json1 = gamesapi_instance.get_game_teams(start_date_range = datetime(season_num, 10, 1), end_date_range = datetime(season_num, 11, 30, 23, 59, 59))
+    Games_json2 = gamesapi_instance.get_game_teams(start_date_range = datetime(season_num, 12, 1), end_date_range = datetime(season_num, 12, 31, 23, 59, 59))
+    Games_json3 = gamesapi_instance.get_game_teams(start_date_range = datetime(season_num + 1, 1, 1), end_date_range = datetime(season_num + 1, 1, 24, 23, 59, 59))
+    Games_json4 = gamesapi_instance.get_game_teams(start_date_range = datetime(season_num + 1, 1, 25), end_date_range = datetime(season_num + 1, 2, 15, 23, 59, 59))
+    Games_json5 = gamesapi_instance.get_game_teams(start_date_range = datetime(season_num + 1, 2, 16), end_date_range = datetime(season_num + 1, 5, 1, 23, 59, 59))
+    Games_df1 = clean_team_game_stats(Games_json1).with_columns(
+            pl.when(pl.col('neutral_site') == True).then(0)
+            .when(pl.col('neutral_site') == False, pl.col('is_home') == True).then(1)
+            .otherwise(-1)
+            .alias("hfa"),
+            points_per_poss = pl.col("points_total") / pl.col("possessions"),
+            opp_points_per_poss = pl.col("opp_points_total") / pl.col("opp_possessions")
+        )
+    Games_df2 = clean_team_game_stats(Games_json2).with_columns(
+            pl.when(pl.col('neutral_site') == True).then(0)
+            .when(pl.col('neutral_site') == False, pl.col('is_home') == True).then(1)
+            .otherwise(-1)
+            .alias("hfa"),
+            points_per_poss = pl.col("points_total") / pl.col("possessions"),
+            opp_points_per_poss = pl.col("opp_points_total") / pl.col("opp_possessions")
+        )
+    Games_df3 = clean_team_game_stats(Games_json3).with_columns(
+            pl.when(pl.col('neutral_site') == True).then(0)
+            .when(pl.col('neutral_site') == False, pl.col('is_home') == True).then(1)
+            .otherwise(-1)
+            .alias("hfa"),
+            points_per_poss = pl.col("points_total") / pl.col("possessions"),
+            opp_points_per_poss = pl.col("opp_points_total") / pl.col("opp_possessions")
+        )
+    Games_df4 = clean_team_game_stats(Games_json4).with_columns(
+            pl.when(pl.col('neutral_site') == True).then(0)
+            .when(pl.col('neutral_site') == False, pl.col('is_home') == True).then(1)
+            .otherwise(-1)
+            .alias("hfa"),
+            points_per_poss = pl.col("points_total") / pl.col("possessions"),
+            opp_points_per_poss = pl.col("opp_points_total") / pl.col("opp_possessions")
+        )
+    Games_df5 = clean_team_game_stats(Games_json5).with_columns(
+            pl.when(pl.col('neutral_site') == True).then(0)
+            .when(pl.col('neutral_site') == False, pl.col('is_home') == True).then(1)
+            .otherwise(-1)
+            .alias("hfa"),
+            points_per_poss = pl.col("points_total") / pl.col("possessions"),
+            opp_points_per_poss = pl.col("opp_points_total") / pl.col("opp_possessions")
+        )
+
+    ### binding games together
+    Full_PY_Games = pl.concat([Games_df1, Games_df2, Games_df3, Games_df4, Games_df5], how = 'vertical_relaxed')
+
+    return Full_PY_Games
+
+
+##### function for converting initial VoATrain dataframes to dataframes that can be left joined after columns are renamed based on what previous season they are from #####
+def voa_train_to_stats(year_string, train_df):
+    VoAStats_df = train_df.rename(lambda col_name: col_name + year_string).rename(
+        {
+            "season" + year_string: "season",
+            "season_label" + year_string: "season_label",
+            "team_id" + year_string: "team_id",
+            "team" + year_string: "team",
+            "conference" + year_string: "conference"
+        }
+    ).select(["team", pl.selectors.ends_with(year_string)])
+
+    return VoAStats_df
+
