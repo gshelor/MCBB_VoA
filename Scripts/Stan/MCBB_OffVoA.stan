@@ -47,7 +47,7 @@ model {
   beta_off_ftpct ~ normal(1, 15);
   beta_off_rebounds ~ normal(2, 15);
   beta_off_turnovers ~ normal(-1, 5);
-  sigma ~ inv_gamma(0, 10); // Half-normal is enforced by <lower=0> in parameters
+  sigma ~ inv_gamma(10, 10); // Half-normal is enforced by <lower=0> in parameters
 
   // Likelihood
   adjoff_ppg ~ normal(

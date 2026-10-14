@@ -1,4 +1,4 @@
-##### Men's D1 College Basketball Vortex of Accuracy Version 0.1 #####
+##### Men's D1 College Basketball Vortex of Accuracy Version 1.0 #####
 ### This script reads in data from the College Basketball Data (CBBD) API and uses it to construct predictive team-strength ratings which are used to make projections for future games.
 ## possibly uses opponent-adjusted stats created in R using game-level data because the PBP data is too big
 ##### importing libraries and setting up python environment and API connection #####
@@ -271,6 +271,14 @@ if today_dt.month == 10:
         weighted_adjdef_rebounds_defensive = (pl.col("adjdef_rebounds_defensive_PY3") * PY3_weight) + (pl.col("adjdef_rebounds_defensive_PY2") * PY2_weight) + (pl.col("adjdef_rebounds_defensive_PY1") * PY1_weight),
         weighted_adjdef_opp_turnovers_total = (pl.col("adjdef_opp_turnovers_total_PY3") * PY3_weight) + (pl.col("adjdef_opp_turnovers_total_PY2") * PY2_weight) + (pl.col("adjdef_opp_turnovers_total_PY1") * PY1_weight)
     )
+
+    VoAStats.write_parquet(os.path.join(
+        os.getcwd(),
+        "Data",
+        "VoA" + str(cbb_season),
+        "PYData",
+        "VoA" + str(cbb_season) + "PYData.parquet"
+    ))
 elif today_dt.month == 11 and today_dt.day <= 15:
     ##### pre-Nov 16 VoA weighted variables #####
     ### PY2 and PY1 included still
@@ -342,6 +350,7 @@ else:
 ### Offensive Model
 ## offensive stats that received opponent adjustments: ["assists", "true_shooting", "opp_blocks", "opp_steals", "field_goals_pct", "two_point_field_goals_pct", "three_point_field_goals_pct", "free_throws_pct", "rebounds_offensive", "turnovers_total", "points_fast_break", "points_off_turnovers", "points_in_paint", "points_per_poss"]
 modelstarttime = datetime.now()
+### PyMC version of the offensive model
 # with pm.Model() as offensive_model:
 #     ### Priors for unknown model parameters
 #     ### using normal priors because I don't know how to use something else (more accurately, I don't know how to fix something else if it goes wrong or doesn't work)
@@ -410,6 +419,10 @@ modelstarttime = datetime.now()
 
 ### what if stan, instead of pymc
 if int(voa_num) == 1:
+    ### Offensive VoA
+    ### dropping null values because some schools don't have opponent-adjusted stats for some reason after the function above
+    ## I think it's because they dropped out of D1 but they have regular stats so I'm confused, but it's more trouble than it's worth to figure it out, so I just drop nulls
+    VoATrain = VoATrain.drop_nulls(["adjoff_ppg", "adjoff_points_per_poss", "adjoff_assists", "adjoff_true_shooting", "adjoff_opp_blocks", "adjoff_opp_steals", "adjoff_field_goals_pct", "adjoff_two_point_field_goals_pct", "adjoff_three_point_field_goals_pct", "adjoff_free_throws_pct", "adjoff_rebounds_offensive", "adjoff_turnovers_total","adjdef_ppg", "adjdef_opp_points_per_poss", "adjdef_opp_assists", "adjdef_opp_true_shooting", "adjdef_blocks", "adjdef_steals", "adjdef_opp_field_goals_pct", "adjdef_opp_two_point_field_goals_pct", "adjdef_opp_three_point_field_goals_pct", "adjdef_opp_free_throws_pct", "adjdef_rebounds_defensive", "adjdef_opp_turnovers_total"])
     ### Prepare Data Dictionary
     off_stan_datalist = {
         "N": VoATrain.height,
@@ -430,39 +443,50 @@ if int(voa_num) == 1:
     # cores = max(1, multiprocessing.cpu_count() // 2)
 
     ### Compile and Sample
-    OffStan_file = os.path.join(os.getcwd(), "Scripts", "Stan", "MCBB_OffVoA.stan")
-    OffStan_model = cmdstanpy.CmdStanModel(stan_file = OffStan_file)
-    OffStan_fit = OffStan_model.sample(
+    # OffVoAStanFile = os.path.join(os.getcwd(), "Scripts", "Stan", "MCBB_OffVoA.stan")
+    OffVoAStanModel = cmdstanpy.CmdStanModel(stan_file = os.path.join(os.getcwd(), "Scripts", "Stan", "MCBB_OffVoA.stan"))
+    OffVoAStanFit = OffVoAStanModel.sample(
         data = off_stan_datalist,
-        iter_sampling = 10000,
-        iter_warmup = 5000,
+        iter_sampling = 7500,
+        iter_warmup = 2500,
         chains = 3,
         seed = 802,
         parallel_chains = os.cpu_count() // 2
     )
 
-    ### summarizing and diagnosing model
-    print(OffStan_fit.summary())
-    print(OffStan_fit.diagnose())
-
-    ### Extract Posterior Draws
-    OffVoA_pars = pl.from_pandas(OffStan_fit.draws_pd(vars=[
-        "b0", "beta_off_ppp", "beta_off_assists", "beta_off_trueshooting", "beta_off_oppblocks", "beta_off_oppsteals", "beta_off_fgpct", "beta_off_2ptfgpct", "beta_off_3ptfgpct", "beta_off_ftpct", "beta_off_rebounds", "beta_off_turnovers", "sigma"
-    ]))
-
-    ### saving parameters as a parquet file so I don't have to re-fit the model each time I run the VoA
-    OffVoA_pars.write_parquet(os.path.join(
+    ### summarizing, diagnosing, saving model
+    print(OffVoAStanFit.summary())
+    print(OffVoAStanFit.diagnose())
+    OffVoAStanFit.save_csvfiles(os.path.join(
         os.getcwd(),
         "Data",
         "FittedModels",
-        "OffVoA_pars.parquet"
+        "OffVoAStanFit"
     ))
+
+    ### Extract Posterior Draws
+    # OffVoA_pars = pl.from_pandas(OffStan_fit.draws_pd(vars=[
+    #     "b0", "beta_off_ppp", "beta_off_assists", "beta_off_trueshooting", "beta_off_oppblocks", "beta_off_oppsteals", "beta_off_fgpct", "beta_off_2ptfgpct", "beta_off_3ptfgpct", "beta_off_ftpct", "beta_off_rebounds", "beta_off_turnovers", "sigma"
+    # ]))
+
+    ### assuming the save_csvfiles function works, I don't need to extract the parameters as a pandas df so I can save as a csv or parquet, I can just re-extract them after loading the StanMCMC object using cmdstanpy's from_csv function
+    ### anyway, extracting posterior draws as a dictionary since I (gemini, not me) finally found a way to calculate the ratings that works and doesn't produce numpy matrix multiplication errors
+    OffVoA_draws_dict = OffVoAStanFit.stan_variables()
+
+
+    ### saving parameters as a parquet file so I don't have to re-fit the model each time I run the VoA
+    # OffVoA_pars.write_parquet(os.path.join(
+    #     os.getcwd(),
+    #     "Data",
+    #     "FittedModels",
+    #     "OffVoA_pars.parquet"
+    # ))
 
      ### using matrix math to turn posterior samples from Stan model into win probability projections for each game
     OffVoA_design_matrix = np.column_stack(
         [
             np.ones(VoAStats.height),
-            VoAStats["weighted_adjoff_ppg"].to_numpy(),
+            # VoAStats["weighted_adjoff_ppg"].to_numpy(),
             VoAStats["weighted_adjoff_points_per_poss"].to_numpy(),
             VoAStats["weighted_adjoff_assists"].to_numpy(),
             VoAStats["weighted_adjoff_true_shooting"].to_numpy(),
@@ -477,136 +501,242 @@ if int(voa_num) == 1:
         ]
     )
 
+    ### list of parameter names (sigma to be factored in later)
+    OffVoA_param_names = ["b0", "beta_off_ppp", "beta_off_assists", "beta_off_trueshooting", "beta_off_oppblocks", "beta_off_oppsteals", "beta_off_fgpct", "beta_off_2ptfgpct", "beta_off_3ptfgpct", "beta_off_ftpct", "beta_off_rebounds", "beta_off_turnovers"]
+
     ### Extract Parameter Matrix: (N_draws x 2)
-    OffVoA_pars_matrix = OffVoA_pars.select(["b0", "beta_off_ppp", "beta_off_assists", "beta_off_trueshooting", "beta_off_oppblocks", "beta_off_oppsteals", "beta_off_fgpct", "beta_off_2ptfgpct", "beta_off_3ptfgpct", "beta_off_ftpct", "beta_off_rebounds", "beta_off_turnovers", "sigma"]).to_numpy()
+    # OffVoA_pars_matrix = OffVoA_pars.select(["b0", "beta_off_ppp", "beta_off_assists", "beta_off_trueshooting", "beta_off_oppblocks", "beta_off_oppsteals", "beta_off_fgpct", "beta_off_2ptfgpct", "beta_off_3ptfgpct", "beta_off_ftpct", "beta_off_rebounds", "beta_off_turnovers"]).to_numpy()
+    OffVoA_pars_matrix = np.column_stack([OffVoA_draws_dict[name] for name in OffVoA_param_names])
+
+    ### extracting sigma to include error
+    OffVoA_sigma = OffVoA_draws_dict["sigma"]
 
     ### Matrix Multiplication -> Linear Predictors (N_draws x N_games)
     OffVoA_means_matrix = OffVoA_pars_matrix @ OffVoA_design_matrix.T
 
     ### applying sigma parameter to posterior samples of adjusted off ppg to generate Off VoA Ratings
-    random.seed(802)
-    sigma_noise = np.random.normal(loc=0.0, scale=OffVoA_pars["sigma"].to_numpy()[:, np.newaxis], size=(OffVoA_pars.height, VoAStats.height))
-    OffVoA_Ratings = OffVoA_means_matrix + sigma_noise
+    P = len(OffVoA_draws_dict['b0'])
+    T_num = VoAStats.height
+    np.random.seed(802)
+
+    noise = np.random.normal(loc=0.0, scale = OffVoA_sigma[:, np.newaxis], size=(P, T_num))
+    OffVoARatings = OffVoA_means_matrix + noise
 
     ### creating final ratings columns
-    OffVoA_MeanRatings = np.mean(OffVoA_Ratings, axis = 0)
-    OffVoA_MedianRatings = np.median(OffVoA_Ratings, axis = 0)
-    OffVoA_upper = np.percentile(OffVoA_Ratings, 97.5, axis = 0)
-    OffVoA_lower = np.percentile(OffVoA_Ratings, 2.5, axis = 0)
+    OffVoA_MeanRatings = np.mean(OffVoARatings, axis = 0)
+    OffVoA_MedianRatings = np.median(OffVoARatings, axis = 0)
+    OffVoA_upper = np.percentile(OffVoARatings, 97.5, axis = 0)
+    OffVoA_lower = np.percentile(OffVoARatings, 2.5, axis = 0)
+    OffVoA_StDev = np.std(OffVoARatings, axis = 0)
+
+    ### adding ratings to VoAStats
+    VoAStats = VoAStats.with_columns(
+        OffVoA_MeanRating = OffVoA_MeanRatings,
+        OffVoA_MedianRating = OffVoA_MedianRatings,
+        OffVoA_975pctRating = OffVoA_upper,
+        OffVoA_025pctRating = OffVoA_lower,
+        OffVoA_SD = OffVoA_StDev
+    )
+
+    ### Defensive VoA
+    ### Prepare Data Dictionary
+    def_stan_datalist = {
+        "N": VoATrain.height,
+        "adjdef_ppg": VoATrain["adjdef_ppg"].to_numpy(),
+        "ppp": VoATrain["adjdef_opp_points_per_poss"].to_numpy(),
+        "assists": VoATrain["adjdef_opp_assists"].to_numpy(),
+        "trueshooting": VoATrain["adjdef_opp_true_shooting"].to_numpy(),
+        "oppblocks": VoATrain["adjdef_blocks"].to_numpy(),
+        "oppsteals": VoATrain["adjdef_steals"].to_numpy(),
+        "fgpct": VoATrain["adjdef_opp_field_goals_pct"].to_numpy(),
+        "twoptfgpct": VoATrain["adjdef_opp_two_point_field_goals_pct"].to_numpy(),
+        "threeptfgpct": VoATrain["adjdef_opp_three_point_field_goals_pct"].to_numpy(),
+        "ftpct": VoATrain["adjdef_opp_free_throws_pct"].to_numpy(),
+        "rebounds": VoATrain["adjdef_rebounds_defensive"].to_numpy(),
+        "turnovers": VoATrain["adjdef_opp_turnovers_total"].to_numpy()
+    }
+
+    # cores = max(1, multiprocessing.cpu_count() // 2)
+
+    ### Compile and Sample
+    # DefVoAStanFile = os.path.join(os.getcwd(), "Scripts", "Stan", "MCBB_DefVoA.stan")
+    DefVoAStanModel = cmdstanpy.CmdStanModel(stan_file = os.path.join(os.getcwd(), "Scripts", "Stan", "MCBB_DefVoA.stan"))
+    DefVoAStanFit = DefVoAStanModel.sample(
+        data = def_stan_datalist,
+        iter_sampling = 7500,
+        iter_warmup = 2500,
+        chains = 3,
+        seed = 802,
+        parallel_chains = os.cpu_count() // 2
+    )
+
+    ### summarizing, diagnosing, saving model
+    print(DefVoAStanFit.summary())
+    print(DefVoAStanFit.diagnose())
+    DefVoAStanFit.save_csvfiles(os.path.join(
+        os.getcwd(),
+        "Data",
+        "FittedModels",
+        "DefVoAStanFit"
+    ))
+
+    ### Extract Posterior Draws
+    # DefVoA_pars = pl.from_pandas(DefStan_fit.draws_pd(vars=[
+    #     "b0", "beta_def_ppp", "beta_def_assists", "beta_def_trueshooting", "beta_def_oppblocks", "beta_def_oppsteals", "beta_def_fgpct", "beta_def_2ptfgpct", "beta_def_3ptfgpct", "beta_def_ftpct", "beta_def_rebounds", "beta_def_turnovers", "sigma"
+    # ]))
+
+    ### assuming the save_csvfiles function works, I don't need to extract the parameters as a pandas df so I can save as a csv or parquet, I can just re-extract them after loading the StanMCMC object using cmdstanpy's from_csv function
+    ### anyway, extracting posterior draws as a dictionary since I (gemini, not me) finally found a way to calculate the ratings that works and doesn't produce numpy matrix multiplication errors
+    DefVoA_draws_dict = DefVoAStanFit.stan_variables()
 
 
-# ### Vectorized Posterior Predictive Calculation
-# predictors = np.vstack([
-#     np.ones(VoAStats.height), # Intercept
-#     VoAStats["adjoff_points_per_poss"].to_numpy(),
-#     VoAStats["adjoff_assists"].to_numpy(),
-#     VoAStats["adjoff_true_shooting"].to_numpy(),
-#     VoAStats["adjoff_opp_blocks"].to_numpy(),
-#     VoAStats["adjoff_opp_steals"].to_numpy(),
-#     VoAStats["adjoff_field_goals_pct"].to_numpy(),
-#     VoAStats["adjoff_two_point_field_goals_pct"].to_numpy(),
-#     VoAStats["adjoff_three_point_field_goals_pct"].to_numpy(),
-#     VoAStats["adjoff_free_throws_pct"].to_numpy(),
-#     VoAStats["adjoff_rebounds_offensive"].to_numpy(),
-#     VoAStats["adjoff_turnovers_total"].to_numpy()
-# ])
+    ### saving parameters as a parquet file so I don't have to re-fit the model each time I run the VoA
+    # DefVoA_pars.write_parquet(os.path.join(
+    #     os.getcwd(),
+    #     "Data",
+    #     "FittedModels",
+    #     "DefVoA_pars.parquet"
+    # ))
 
-# # Matrix of coefficients: (Samples x Features)
-# betas = pars.drop(columns=["sigma"]).values 
+     ### using matrix math to turn posterior samples from Stan model into win probability projections for each game
+    DefVoA_design_matrix = np.column_stack(
+        [
+            np.ones(VoAStats.height),
+            # VoAStats["weighted_adjdef_ppg"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_points_per_poss"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_assists"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_true_shooting"].to_numpy(),
+            VoAStats["weighted_adjdef_blocks"].to_numpy(),
+            VoAStats["weighted_adjdef_steals"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_field_goals_pct"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_two_point_field_goals_pct"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_three_point_field_goals_pct"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_free_throws_pct"].to_numpy(),
+            VoAStats["weighted_adjdef_rebounds_defensive"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_turnovers_total"].to_numpy()
+        ]
+    )
 
-# # Calculate mu (Samples x Teams)
-# mu = np.dot(betas, predictors)
+    ### list of parameter names (sigma to be factored in later)
+    DefVoA_param_names = ["b0", "beta_def_ppp", "beta_def_assists", "beta_def_trueshooting", "beta_def_blocks", "beta_def_steals", "beta_def_fgpct", "beta_def_2ptfgpct", "beta_def_3ptfgpct", "beta_def_ftpct", "beta_def_rebounds", "beta_def_turnovers"]
 
-# # Add process uncertainty (sigma)
-# rng = np.random.default_rng(802)
-# sigma_vec = pars["sigma"].values[:, np.newaxis]
-# posterior_preds = mu + rng.normal(0, 1, size=mu.shape) * sigma_vec
+    ### Extract Parameter Matrix: (N_draws x 2)
+    # DefVoA_pars_matrix = DefVoA_pars.select(["b0", "beta_def_ppp", "beta_def_assists", "beta_def_trueshooting", "beta_def_oppblocks", "beta_def_oppsteals", "beta_def_fgpct", "beta_def_2ptfgpct", "beta_def_3ptfgpct", "beta_def_ftpct", "beta_def_rebounds", "beta_def_turnovers"]).to_numpy()
+    DefVoA_pars_matrix = np.column_stack([DefVoA_draws_dict[name] for name in DefVoA_param_names])
 
-# # 5. Summary Statistics back to Polars
-# VoAStatsStan = VoAStats.with_columns([
-#     pl.Series("OffVoA_MeanRating_stan", posterior_preds.mean(axis=0)),
-#     pl.Series("OffVoA_MedRating_stan", np.median(posterior_preds, axis=0)),
-#     pl.Series("OffVoA_95PctRating_stan", np.percentile(posterior_preds, 97.5, axis=0)),
-#     pl.Series("OffVoA_05PctRating_stan", np.percentile(posterior_preds, 2.5, axis=0)),
-#     pl.Series("OffVoA_SD_stan", np.std(posterior_preds, axis = 0))
-# ])
+    ### extracting sigma to include error
+    DefVoA_sigma = DefVoA_draws_dict["sigma"]
+
+    ### Matrix Multiplication -> Linear Predictors (N_draws x N_games)
+    DefVoA_means_matrix = DefVoA_pars_matrix @ DefVoA_design_matrix.T
+
+    ### applying sigma parameter to posterior samples of adjusted def ppg to generate Def VoA Ratings
+    P = len(DefVoA_draws_dict['b0'])
+    T_num = VoAStats.height
+    np.random.seed(802)
+
+    noise = np.random.normal(loc=0.0, scale = DefVoA_sigma[:, np.newaxis], size=(P, T_num))
+    DefVoARatings = DefVoA_means_matrix + noise
+
+    ### creating final ratings columns
+    DefVoA_MeanRatings = np.mean(DefVoARatings, axis = 0)
+    DefVoA_MedianRatings = np.median(DefVoARatings, axis = 0)
+    DefVoA_upper = np.percentile(DefVoARatings, 97.5, axis = 0)
+    DefVoA_lower = np.percentile(DefVoARatings, 2.5, axis = 0)
+    DefVoA_StDev = np.std(DefVoARatings, axis = 0)
+
+    ### adding ratings to VoAStats
+    VoAStats = VoAStats.with_columns(
+        DefVoA_MeanRating = DefVoA_MeanRatings,
+        DefVoA_MedianRating = DefVoA_MedianRatings,
+        DefVoA_975pctRating = DefVoA_upper,
+        DefVoA_025pctRating = DefVoA_lower,
+        DefVoA_SD = DefVoA_StDev
+    )
+
+elif today_dt.month == 11 or today_dt.month == 12:
+    print("put new VoA stuff here, models should already be fitted so read in params, combine with relevant weighted fields")
+else:
+    print("current season only VoA, put stuff here later")
+ 
+
 
 # # Sort by the fastest teams in the country
 # teams_master_df = teams_master_df.sort("adj_pace", descending=True)
 
 
-with pm.Model() as defensive_model:
-    ### Priors for unknown model parameters
-    ### using normal priors because I don't know how to use something else (more accurately, I don't know how to fix something else if it goes wrong or doesn't work)
-    ## b0 is the intercept
-    b0 = pm.Normal("b0", mu = 50, sigma = 5)
-    beta_def_oppppp = pm.Normal("beta_def_adjdefppp", mu = 2, sigma = 10)
-    beta_def_oppassists = pm.Normal("beta_def_assists", mu = 1, sigma = 10)
-    beta_def_opptrueshooting = pm.Normal("beta_def_trueshooting", mu = 2.5, sigma = 10)
-    beta_def_blocks = pm.Normal("beta_def_oppblocks", mu = -2, sigma = 5)
-    beta_def_steals = pm.Normal("beta_def_oppsteals", mu = -2, sigma = 5)
-    beta_def_oppfgpct = pm.Normal("beta_def_fgpct", mu = 2, sigma = 20)
-    beta_def_opp2ptfgpct = pm.Normal("beta_def_twoptfgpct", mu = 1, sigma = 15)
-    beta_def_opp3ptfgpct = pm.Normal("beta_def_threeptfgpct", mu = 1, sigma = 15)
-    beta_def_oppftpct = pm.Normal("beta_def_ftpct", mu = 1, sigma = 15)
-    beta_def_rebounds = pm.Normal("beta_def_rebounds", mu = 2, sigma = 15)
-    beta_def_oppturnovers = pm.Normal("beta_def_turnovers", mu = -1, sigma = 5)
-    ### variance prior
-    sigma = pm.HalfNormal("sigma", sigma=10)
+# with pm.Model() as defensive_model:
+#     ### Priors for unknown model parameters
+#     ### using normal priors because I don't know how to use something else (more accurately, I don't know how to fix something else if it goes wrong or doesn't work)
+#     ## b0 is the intercept
+#     b0 = pm.Normal("b0", mu = 50, sigma = 5)
+#     beta_def_oppppp = pm.Normal("beta_def_adjdefppp", mu = 2, sigma = 10)
+#     beta_def_oppassists = pm.Normal("beta_def_assists", mu = 1, sigma = 10)
+#     beta_def_opptrueshooting = pm.Normal("beta_def_trueshooting", mu = 2.5, sigma = 10)
+#     beta_def_blocks = pm.Normal("beta_def_oppblocks", mu = -2, sigma = 5)
+#     beta_def_steals = pm.Normal("beta_def_oppsteals", mu = -2, sigma = 5)
+#     beta_def_oppfgpct = pm.Normal("beta_def_fgpct", mu = 2, sigma = 20)
+#     beta_def_opp2ptfgpct = pm.Normal("beta_def_twoptfgpct", mu = 1, sigma = 15)
+#     beta_def_opp3ptfgpct = pm.Normal("beta_def_threeptfgpct", mu = 1, sigma = 15)
+#     beta_def_oppftpct = pm.Normal("beta_def_ftpct", mu = 1, sigma = 15)
+#     beta_def_rebounds = pm.Normal("beta_def_rebounds", mu = 2, sigma = 15)
+#     beta_def_oppturnovers = pm.Normal("beta_def_turnovers", mu = -1, sigma = 5)
+#     ### variance prior
+#     sigma = pm.HalfNormal("sigma", sigma=10)
 
-    # Expected value of outcome (The Linear Predictor)
-    mu = (
-        b0 +
-        beta_def_oppppp * VoAStats['adjdef_opp_points_per_poss'].to_numpy() +
-        beta_def_oppassists * VoAStats['adjdef_opp_assists'].to_numpy() +
-        beta_def_opptrueshooting * VoAStats['adjdef_opp_true_shooting'].to_numpy() +
-        beta_def_blocks * VoAStats['adjdef_blocks'].to_numpy() +
-        beta_def_steals * VoAStats['adjdef_steals'].to_numpy() +
-        beta_def_oppfgpct * VoAStats['adjdef_opp_field_goals_pct'].to_numpy() +
-        beta_def_opp2ptfgpct * VoAStats['adjdef_opp_two_point_field_goals_pct'].to_numpy() +
-        beta_def_opp3ptfgpct * VoAStats['adjdef_opp_three_point_field_goals_pct'].to_numpy() +
-        beta_def_oppftpct * VoAStats['adjdef_opp_free_throws_pct'].to_numpy() +
-        beta_def_rebounds * VoAStats['adjdef_rebounds_defensive'].to_numpy() +
-        beta_def_oppturnovers * VoAStats['adjdef_opp_turnovers_total'].to_numpy()
-    )
+#     # Expected value of outcome (The Linear Predictor)
+#     mu = (
+#         b0 +
+#         beta_def_oppppp * VoAStats['adjdef_opp_points_per_poss'].to_numpy() +
+#         beta_def_oppassists * VoAStats['adjdef_opp_assists'].to_numpy() +
+#         beta_def_opptrueshooting * VoAStats['adjdef_opp_true_shooting'].to_numpy() +
+#         beta_def_blocks * VoAStats['adjdef_blocks'].to_numpy() +
+#         beta_def_steals * VoAStats['adjdef_steals'].to_numpy() +
+#         beta_def_oppfgpct * VoAStats['adjdef_opp_field_goals_pct'].to_numpy() +
+#         beta_def_opp2ptfgpct * VoAStats['adjdef_opp_two_point_field_goals_pct'].to_numpy() +
+#         beta_def_opp3ptfgpct * VoAStats['adjdef_opp_three_point_field_goals_pct'].to_numpy() +
+#         beta_def_oppftpct * VoAStats['adjdef_opp_free_throws_pct'].to_numpy() +
+#         beta_def_rebounds * VoAStats['adjdef_rebounds_defensive'].to_numpy() +
+#         beta_def_oppturnovers * VoAStats['adjdef_opp_turnovers_total'].to_numpy()
+#     )
 
-    ### Likelihood (Sampling distribution of the data)
-    Y_obs = pm.Normal(
-        "Y_obs", 
-        mu = mu, 
-        sigma = sigma, 
-        observed = VoAStats["adjdef_ppg"].to_numpy()
-    )
+#     ### Likelihood (Sampling distribution of the data)
+#     Y_obs = pm.Normal(
+#         "Y_obs", 
+#         mu = mu, 
+#         sigma = sigma, 
+#         observed = VoAStats["adjdef_ppg"].to_numpy()
+#     )
 
-    ### Fit the Model (MCMC Sampling)
-    idata = pm.sample(
-        draws = 7500, 
-        tune = 2500, 
-        chains = 3, 
-        random_seed = 802,
-        cores = os.cpu_count() // 2
-    )
+#     ### Fit the Model (MCMC Sampling)
+#     idata = pm.sample(
+#         draws = 7500, 
+#         tune = 2500, 
+#         chains = 3, 
+#         random_seed = 802,
+#         cores = os.cpu_count() // 2
+#     )
 
-    ### Generate Posterior Predictive Samples
-    pm.sample_posterior_predictive(idata, extend_inferencedata = True)
+#     ### Generate Posterior Predictive Samples
+#     pm.sample_posterior_predictive(idata, extend_inferencedata = True)
 
-### Extract posterior predictions using ArviZ
-posterior_preds = idata.posterior_predictive["Y_obs"].stack(sample=("chain", "draw")).values
+# ### Extract posterior predictions using ArviZ
+# posterior_preds = idata.posterior_predictive["Y_obs"].stack(sample=("chain", "draw")).values
 
-###  Add mean, median, percentiles back to Polars as new columns
-VoAStats = VoAStats.with_columns(
-    DefVoA_MeanRating = posterior_preds.mean(axis=1),
-    DefVoA_MedRating = np.median(posterior_preds, axis=1),
-    DefVoA_975PctRating = np.percentile(posterior_preds, 97.5, axis=1),
-    DefVoA_025PctRating = np.percentile(posterior_preds, 2.5, axis=1),
-    DefVoA_SD = np.std(posterior_preds, axis = 1))
+# ###  Add mean, median, percentiles back to Polars as new columns
+# VoAStats = VoAStats.with_columns(
+#     DefVoA_MeanRating = posterior_preds.mean(axis=1),
+#     DefVoA_MedRating = np.median(posterior_preds, axis=1),
+#     DefVoA_975PctRating = np.percentile(posterior_preds, 97.5, axis=1),
+#     DefVoA_025PctRating = np.percentile(posterior_preds, 2.5, axis=1),
+#     DefVoA_SD = np.std(posterior_preds, axis = 1))
 
 ### Calculating Overall Rating by subtracting defensive rating from overall rating
 ## accidentally mislabled
 VoAStats = VoAStats.with_columns(
     OvrlVoA_MeanRating = pl.col('OffVoA_MeanRating') - pl.col('DefVoA_MeanRating'),
-    OvrlVoA_975pctRating = pl.col('OffVoA_975PctRating') - pl.col('DefVoA_975PctRating'),
-    OvrlVoA_025pctRating = pl.col('OffVoA_025PctRating') - pl.col('DefVoA_025PctRating')
+    OvrlVoA_975pctRating = pl.col('OffVoA_975pctRating') - pl.col('DefVoA_975pctRating'),
+    OvrlVoA_025pctRating = pl.col('OffVoA_025pctRating') - pl.col('DefVoA_025pctRating')
 )
 
 ### Creating Ranking Columns for the overall, offensive, and defensive mean ratings
@@ -621,117 +751,124 @@ modelendtime = datetime.now()
 
 ##### Saving VoAStats and creating output tables #####
 ### Saving final VoA csv
-VoAStats.write_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + ".csv"))
+VoAStats.write_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + ".parquet"))
 
 ### preparing VoAStats for making the gt table
-VoATable_df = VoAStats.select(['team', 'OvrlVoA_MeanRating', 'OvrlVoARanking', 'OffVoA_MeanRating', 'OffVoARanking', 'DefVoA_MeanRating', 'DefVoARanking']).sort('OvrlVoARanking', descending = False)
+VoATable_df = VoAStats.select(['team', 'OvrlVoA_MeanRating', 'OvrlVoARanking', 'OffVoA_MeanRating', 'OffVoARanking', 'DefVoA_MeanRating', 'DefVoARanking', pl.selectors.starts_with("logo_")]).sort('OvrlVoARanking', descending = False)
 
-VoATable_Top25df = VoATable_df.filter(pl.col('OvrlVoARanking') <= 25)
+### writing out csv file to be used to generate table using gt in R instead of python, as well as for creating table for public visulization on github website
+VoATable_df.write_csv(os.path.join(
+    os.getcwd(),
+    "Data",
+    "CurrentVoA.csv"
+))
 
-### creating table using gt
-Top25_gt = (
-    GT(VoATable_Top25df)
-    .tab_header(
-        title = cbb_season_str + " MCBB D1 Vortex of Accuracy Top 25 Ratings",
-        subtitle = "Supremely Excellent Yet Salaciously Godlike And Infallibly Magnificent Vortex of Accuracy, " + str(today_dt.date())
-    )
-    # Formatting numbers (grouped by decimal count for efficiency)
-    .fmt_number(
-        columns = ["OvrlVoA_MeanRating", "OffVoA_MeanRating", "DefVoA_MeanRating"],
-        decimals = 3
-    )
-    .fmt_number(
-        columns=["OvrlVoARanking"],
-        decimals=0
-    )
-    .data_color(
-        columns = ["OvrlVoA_MeanRating", "OffVoA_MeanRating"],
-        palette = "RdYlGn",
-        na_color = "white",
-        ### this autocolor line was added because there's apparently a bug in great-tables?
-        ## stack overflow also suggested upgrading but I did that and nothing happened (I went from 0.18.0 to 0.21.0, same key error occured "'font_color_row_striping_background_color'")
-        # autocolor_text = False
-    )
-    .data_color(
-        columns = ["DefVoA_MeanRating"],
-        palette = "RdYlGn",
-        reverse = True,
-        na_color = "white",
-        ### turning off autocolor_text for same reason described above
-        # autocolor_text = False
-    )
-    # Column Labels
-    .cols_label(
-        OvrlVoA_MeanRating = "Overall VoA Rating",
-        OvrlVoARanking = "VoA Ranking",
-        OffVoA_MeanRating = "Off VoA Rating",
-        OffVoARanking = "Off Ranking",
-        DefVoA_MeanRating = "Def VoA Rating",
-        DefVoARanking = "Def Ranking"
-    )
-    # Hide columns
-    # .cols_hide(columns=["week", "VoA_Output"])
-    # Add Footnote
-    .tab_source_note(
-        source_note = "Table by @gshelor, Data from CBBD API"
-    )
-)
+# VoATable_Top25df = VoATable_df.filter(pl.col('OvrlVoARanking') <= 25)
 
-### saving Top 25 table
-Top25_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoATop25Table.png"))
+# ### creating table using gt
+# Top25_gt = (
+#     GT(VoATable_Top25df)
+#     .tab_header(
+#         title = cbb_season_str + " MCBB D1 Vortex of Accuracy Top 25 Ratings",
+#         subtitle = "Supremely Excellent Yet Salaciously Godlike And Infallibly Magnificent Vortex of Accuracy, " + str(today_dt.date())
+#     )
+#     # Formatting numbers (grouped by decimal count for efficiency)
+#     .fmt_number(
+#         columns = ["OvrlVoA_MeanRating", "OffVoA_MeanRating", "DefVoA_MeanRating"],
+#         decimals = 3
+#     )
+#     .fmt_number(
+#         columns=["OvrlVoARanking"],
+#         decimals=0
+#     )
+#     .data_color(
+#         columns = ["OvrlVoA_MeanRating", "OffVoA_MeanRating"],
+#         palette = "RdYlGn",
+#         na_color = "white",
+#         ### this autocolor line was added because there's apparently a bug in great-tables?
+#         ## stack overflow also suggested upgrading but I did that and nothing happened (I went from 0.18.0 to 0.21.0, same key error occured "'font_color_row_striping_background_color'")
+#         # autocolor_text = False
+#     )
+#     .data_color(
+#         columns = ["DefVoA_MeanRating"],
+#         palette = "RdYlGn",
+#         reverse = True,
+#         na_color = "white",
+#         ### turning off autocolor_text for same reason described above
+#         # autocolor_text = False
+#     )
+#     # Column Labels
+#     .cols_label(
+#         OvrlVoA_MeanRating = "Overall VoA Rating",
+#         OvrlVoARanking = "VoA Ranking",
+#         OffVoA_MeanRating = "Off VoA Rating",
+#         OffVoARanking = "Off Ranking",
+#         DefVoA_MeanRating = "Def VoA Rating",
+#         DefVoARanking = "Def Ranking"
+#     )
+#     # Hide columns
+#     # .cols_hide(columns=["week", "VoA_Output"])
+#     # Add Footnote
+#     .tab_source_note(
+#         source_note = "Table by @gshelor, Data from CBBD API"
+#     )
+# )
 
-### creating Full table using gt
-FullTable_gt = (
-    GT(VoATable_df)
-    .tab_header(
-        title = cbb_season_str + " MCBB D1 Vortex of Accuracy Ratings",
-        subtitle = "Supremely Excellent Yet Salaciously Godlike And Infallibly Magnificent Vortex of Accuracy, " + str(today_dt.date())
-    )
-    # Formatting numbers (grouped by decimal count for efficiency)
-    .fmt_number(
-        columns = ["OvrlVoA_MeanRating", "OffVoA_MeanRating", "DefVoA_MeanRating"],
-        decimals = 3
-    )
-    .fmt_number(
-        columns=["OvrlVoARanking"],
-        decimals=0
-    )
-    .data_color(
-        columns = ["OvrlVoA_MeanRating", "OffVoA_MeanRating"],
-        palette = "RdYlGn",
-        na_color = "white",
-        ### this autocolor line was added because there's apparently a bug in great-tables?
-        ## stack overflow also suggested upgrading but I did that and nothing happened (I went from 0.18.0 to 0.21.0, same key error occured "'font_color_row_striping_background_color'")
-        # autocolor_text = False
-    )
-    .data_color(
-        columns = ["DefVoA_MeanRating"],
-        palette = "RdYlGn",
-        reverse = True,
-        na_color = "white",
-        ### turning off autocolor_text for same reason described above
-        # autocolor_text = False
-    )
-    # Column Labels
-    .cols_label(
-        OvrlVoA_MeanRating = "Overall VoA Rating",
-        OvrlVoARanking = "VoA Ranking",
-        OffVoA_MeanRating = "Off VoA Rating",
-        OffVoARanking = "Off Ranking",
-        DefVoA_MeanRating = "Def VoA Rating",
-        DefVoARanking = "Def Ranking"
-    )
-    # Hide columns
-    # .cols_hide(columns=["week", "VoA_Output"])
-    # Add Footnote
-    .tab_source_note(
-        source_note = "Table by @gshelor, Data from CBBD API"
-    )
-)
+# ### saving Top 25 table
+# Top25_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoATop25Table.png"))
 
-FullTable_gt.show()
-### Display and Save
-FullTable_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoAFullTable.png"))
+# ### creating Full table using gt
+# FullTable_gt = (
+#     GT(VoATable_df)
+#     .tab_header(
+#         title = cbb_season_str + " MCBB D1 Vortex of Accuracy Ratings",
+#         subtitle = "Supremely Excellent Yet Salaciously Godlike And Infallibly Magnificent Vortex of Accuracy, " + str(today_dt.date())
+#     )
+#     # Formatting numbers (grouped by decimal count for efficiency)
+#     .fmt_number(
+#         columns = ["OvrlVoA_MeanRating", "OffVoA_MeanRating", "DefVoA_MeanRating"],
+#         decimals = 3
+#     )
+#     .fmt_number(
+#         columns=["OvrlVoARanking"],
+#         decimals=0
+#     )
+#     .data_color(
+#         columns = ["OvrlVoA_MeanRating", "OffVoA_MeanRating"],
+#         palette = "RdYlGn",
+#         na_color = "white",
+#         ### this autocolor line was added because there's apparently a bug in great-tables?
+#         ## stack overflow also suggested upgrading but I did that and nothing happened (I went from 0.18.0 to 0.21.0, same key error occured "'font_color_row_striping_background_color'")
+#         # autocolor_text = False
+#     )
+#     .data_color(
+#         columns = ["DefVoA_MeanRating"],
+#         palette = "RdYlGn",
+#         reverse = True,
+#         na_color = "white",
+#         ### turning off autocolor_text for same reason described above
+#         # autocolor_text = False
+#     )
+#     # Column Labels
+#     .cols_label(
+#         OvrlVoA_MeanRating = "Overall VoA Rating",
+#         OvrlVoARanking = "VoA Ranking",
+#         OffVoA_MeanRating = "Off VoA Rating",
+#         OffVoARanking = "Off Ranking",
+#         DefVoA_MeanRating = "Def VoA Rating",
+#         DefVoARanking = "Def Ranking"
+#     )
+#     # Hide columns
+#     # .cols_hide(columns=["week", "VoA_Output"])
+#     # Add Footnote
+#     .tab_source_note(
+#         source_note = "Table by @gshelor, Data from CBBD API"
+#     )
+# )
+
+# FullTable_gt.show()
+# ### Display and Save
+# FullTable_gt.save(file = os.path.join(os.getcwd(), "Outputs", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoAFullTable.png"))
 
 ##### POOPYPANTS TESTING HERE #####
 # VoAStats.write_csv(os.path.join(os.getcwd(), "poopypants.csv"))

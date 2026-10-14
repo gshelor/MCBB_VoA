@@ -74,3 +74,71 @@ test_df = Games_df.with_columns(
 
 
 # poopypants2 = voa_train_to_stats("_PY1", VoATrain_PY1)
+
+### making sure I can load the csv files from cmdstanpy's save_csvfiles function
+poopypants = cmdstanpy.from_csv(os.path.join(
+        os.getcwd(),
+        "Data",
+        "FittedModels",
+        "OffVoAStanFit.csv"
+    ))
+
+poopypants.diagnose()
+poopypants.summary()
+OffVoA_draws_dict = poopypants.stan_variables()
+
+
+    ### saving parameters as a parquet file so I don't have to re-fit the model each time I run the VoA
+    # OffVoA_pars.write_parquet(os.path.join(
+    #     os.getcwd(),
+    #     "Data",
+    #     "FittedModels",
+    #     "OffVoA_pars.parquet"
+    # ))
+
+     ### using matrix math to turn posterior samples from Stan model into win probability projections for each game
+OffVoA_design_matrix = np.column_stack(
+    [
+        np.ones(VoAStats.height),
+        # VoAStats["weighted_adjoff_ppg"].to_numpy(),
+        VoAStats["weighted_adjoff_points_per_poss"].to_numpy(),
+        VoAStats["weighted_adjoff_assists"].to_numpy(),
+        VoAStats["weighted_adjoff_true_shooting"].to_numpy(),
+        VoAStats["weighted_adjoff_opp_blocks"].to_numpy(),
+        VoAStats["weighted_adjoff_opp_steals"].to_numpy(),
+        VoAStats["weighted_adjoff_field_goals_pct"].to_numpy(),
+        VoAStats["weighted_adjoff_two_point_field_goals_pct"].to_numpy(),
+        VoAStats["weighted_adjoff_three_point_field_goals_pct"].to_numpy(),
+        VoAStats["weighted_adjoff_free_throws_pct"].to_numpy(),
+        VoAStats["weighted_adjoff_rebounds_offensive"].to_numpy(),
+        VoAStats["weighted_adjoff_turnovers_total"].to_numpy()
+    ]
+)
+
+    ### list of parameter names (sigma to be factored in later)
+OffVoA_param_names = ["b0", "beta_off_ppp", "beta_off_assists", "beta_off_trueshooting", "beta_off_oppblocks", "beta_off_oppsteals", "beta_off_fgpct", "beta_off_2ptfgpct", "beta_off_3ptfgpct", "beta_off_ftpct", "beta_off_rebounds", "beta_off_turnovers"]
+
+    ### Extract Parameter Matrix: (N_draws x 2)
+    # OffVoA_pars_matrix = OffVoA_pars.select(["b0", "beta_off_ppp", "beta_off_assists", "beta_off_trueshooting", "beta_off_oppblocks", "beta_off_oppsteals", "beta_off_fgpct", "beta_off_2ptfgpct", "beta_off_3ptfgpct", "beta_off_ftpct", "beta_off_rebounds", "beta_off_turnovers"]).to_numpy()
+OffVoA_pars_matrix = np.column_stack([OffVoA_draws_dict[name] for name in OffVoA_param_names])
+
+    ### extracting sigma to include error
+OffVoA_sigma = OffVoA_draws_dict["sigma"]
+
+    ### Matrix Multiplication -> Linear Predictors (N_draws x N_games)
+OffVoA_means_matrix = OffVoA_pars_matrix @ OffVoA_design_matrix.T
+
+    ### applying sigma parameter to posterior samples of adjusted off ppg to generate Off VoA Ratings
+P = len(OffVoA_draws_dict['b0'])
+T_num = VoAStats.height
+np.random.seed(802)
+
+noise = np.random.normal(loc=0.0, scale = OffVoA_sigma[:, np.newaxis], size=(P, T_num))
+OffVoARatings = OffVoA_means_matrix + noise
+
+    ### creating final ratings columns
+OffVoA_MeanRatings = np.mean(OffVoARatings, axis = 0)
+OffVoA_MedianRatings = np.median(OffVoARatings, axis = 0)
+OffVoA_upper = np.percentile(OffVoARatings, 97.5, axis = 0)
+OffVoA_lower = np.percentile(OffVoARatings, 2.5, axis = 0)
+OffVoA_StDev = np.std(OffVoARatings, axis = 0)

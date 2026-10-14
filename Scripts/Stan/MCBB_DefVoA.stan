@@ -22,8 +22,8 @@ parameters {
   real beta_def_ppp;
   real beta_def_assists;
   real beta_def_trueshooting;
-  real beta_def_oppblocks;
-  real beta_def_oppsteals;
+  real beta_def_blocks;
+  real beta_def_steals;
   real beta_def_fgpct;
   real beta_def_2ptfgpct;
   real beta_def_3ptfgpct;
@@ -39,15 +39,15 @@ model {
   beta_def_ppp ~ normal(2, 10);
   beta_def_assists ~ normal(1, 10);
   beta_def_trueshooting ~ normal(2.5, 10);
-  beta_def_oppblocks ~ normal(-2, 5);
-  beta_def_oppsteals ~ normal(-2, 5);
+  beta_def_blocks ~ normal(-2, 5);
+  beta_def_steals ~ normal(-2, 5);
   beta_def_fgpct ~ normal(2, 20);
   beta_def_2ptfgpct ~ normal(1, 15);
   beta_def_3ptfgpct ~ normal(1, 15);
   beta_def_ftpct ~ normal(1, 15);
   beta_def_rebounds ~ normal(2, 15);
   beta_def_turnovers ~ normal(-1, 5);
-  sigma ~ inv_gamma(0, 10); // Half-normal is enforced by <lower=0> in parameters
+  sigma ~ inv_gamma(10, 10); // Half-normal is enforced by <lower=0> in parameters
 
   // Likelihood
   adjdef_ppg ~ normal(
@@ -55,8 +55,8 @@ model {
     beta_def_ppp * ppp + 
     beta_def_assists * assists + 
     beta_def_trueshooting * trueshooting + 
-    beta_def_oppblocks * oppblocks + 
-    beta_def_oppsteals * oppsteals + 
+    beta_def_blocks * oppblocks + 
+    beta_def_steals * oppsteals + 
     beta_def_fgpct * fgpct + 
     beta_def_2ptfgpct * twoptfgpct + 
     beta_def_3ptfgpct * threeptfgpct + 
