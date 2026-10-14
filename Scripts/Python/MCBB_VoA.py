@@ -49,7 +49,7 @@ voa_num = input("Which release of the VoA is this for the season? ")
 ### if this is the first VoA, all of my file pathways where I save various files and such will be created here
 ## it should create any nested pathways as well, meaning any folders in the pathway that don't exist yet will also be created
 ## inshallah motherfuckers
-if int(voa_num) == 1:
+if int(voa_num) == 0:
     accuracy_metrics_path = os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "AccuracyMetrics")
     game_stats_path = os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "GameStats")
     projections_cbbd_path = os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "Projections", "CBBD")
@@ -95,7 +95,7 @@ if today_dt.month == 10:
     VoATeams = Teams_df.with_columns(
         pl.col('logos').list.get(x, null_on_oob=True).alias(f'logo_{x}') for x in range(max_width)).filter(
             pl.col('team').is_in(VoATrain_PY1['team'].implode()) & pl.col('team').is_in(VoATrain_PY2['team'].implode()) & pl.col('team').is_in(VoATrain_PY3['team'].implode())
-        )
+        ).with_columns(voa_iter = int(voa_num))
 
     ### converting train season stats dfs to VoAStats dfs so they can be left joined
     VoAStats_PY3 = voa_train_to_stats("_PY3", VoATrain_PY3)
@@ -119,8 +119,15 @@ if today_dt.month == 10:
     GamesPaceAdj_PY1 = Games_PY1.group_by("game_id").first()
 elif today_dt.month == 11 and today_dt.day < 15:
     ### reading in PY1 and PY2 stats saved from preseason VoA
-    PYData = pl.read_parquet()
+    PYData = pl.read_parquet(os.path.join(
+        os.getcwd(),
+        "VoA" + cbb_season,
+        "PYData",
+        "VoA" + cbb_season + "PYData.parquet"
+    ))
+    ### getting current season stats
     TeamSeasonStats_json = statsapi_instance.get_team_season_stats(cbb_season)
+    VoAStats = clean_season_stats(TeamSeasonStats_json)
 else:
     ### only current season info
     TeamSeasonStats_json = statsapi_instance.get_team_season_stats(cbb_season)
@@ -142,6 +149,7 @@ else:
     # CleanGames6_df = clean_team_game_stats(Games6_json)
     ### binding cleaned games together
     ### polars gives a warning that the is_in() in the filter part of the code below is deprecated (as of March 2, 2026 I'm on polars version 1.37.1) but it works and does what I want it to and everybody in the github issue it links to (https://github.com/pola-rs/polars/issues/22149) is mad that it would be producing an issue at all, given that the below usage of is_in() is what they all think would be the most common usage would be (and I agree) so hopefully it stays intact
+    ## since I encountered this issue last spring I've since found that using implode() after the is_in produces the same effect and doesn't product the warning so I'm just going to keep that until I update the library or whatever
     AllGamesStatAdj = pl.concat(
         [AllGamesStatAdj, CleanGames_df], how = "vertical_relaxed").filter(
             (pl.col("team").is_in(VoAStats['team'].implode()) & pl.col("opponent").is_in(VoAStats['team'].implode()))
@@ -418,7 +426,7 @@ modelstarttime = datetime.now()
 #     OffVoA_SD = np.std(posterior_preds, axis = 1))
 
 ### what if stan, instead of pymc
-if int(voa_num) == 1:
+if int(voa_num) == 0:
     ### Offensive VoA
     ### dropping null values because some schools don't have opponent-adjusted stats for some reason after the function above
     ## I think it's because they dropped out of D1 but they have regular stats so I'm confused, but it's more trouble than it's worth to figure it out, so I just drop nulls
