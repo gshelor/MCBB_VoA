@@ -38,7 +38,7 @@ else:
 eval_check = input("Is this the first model eval of the season? (y/n) ")
 
 if eval_check == 'y':
-    os.makedirs(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'AccuracyMetrics'))
+    os.makedirs(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'AccuracyMetrics'), exist_ok = True)
 else:
     print("accuracy metrics directory should already exist")
 
@@ -46,7 +46,7 @@ else:
 for i in eval_check:
     if eval_check == 'y':
         ### reading in csv of prior predictions to be bound to upcoming games df so I can save all predictions together in one csv
-        GamePreds = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "Projections", "MCBBVoA" + datestring + "GameProjections.csv"), schema = {
+        GamePreds = pl.read_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "Projections", "MCBBVoA" + datestring + "GameProjections.parquet"), schema = {
             'id': pl.Int64,
             'source_id': pl.String,
             'season_label': pl.String,
@@ -243,7 +243,7 @@ SeasonAccuracy = pl.DataFrame({
 )
 
 ### writing out csvs of accuracy metrics so I don't have to recalculate for each game
-CompletedGames.write_csv(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'AccuracyMetrics', 'VoACompletedGames' + str(cbb_season) + 'AccuracyMetrics.csv'))
+CompletedGames.write_parquet(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'AccuracyMetrics', 'VoACompletedGames' + str(cbb_season) + 'AccuracyMetrics.parquet'))
 SeasonAccuracy.write_csv(os.path.join(os.getcwd(), 'Data', 'VoA' + str(cbb_season), 'AccuracyMetrics', 'VoA' + str(cbb_season) + 'SeasonAccuracyMetrics.csv'))
 
 
