@@ -13,17 +13,19 @@ from dotenv import load_dotenv
 from datetime import date, datetime, timedelta
 import cmdstanpy
 import multiprocessing
-import pymc as pm
-import arviz as az
-import preliz as pz
+# import pymc as pm
+# import arviz as az
+# import preliz as pz
 import statsmodels.formula.api as smf
 import random
-from great_tables import GT
-import selenium
+# from great_tables import GT
+# import selenium
 # import bambi as bmb
 from pymer4.models import lmer
 # import sportsdataverse
 # import json
+
+script_start_time = datetime.now()
 
 ### loading environmental variables (API token, so it's not directly printed in the code for security)
 load_dotenv()
@@ -895,3 +897,5 @@ VoATable_df.write_csv(os.path.join(
 # ).select(['team', 'OvrlVoARanking', 'OvrlVoA_MeanRating', 'adj_ppg_diff', 'pts_per_100_poss_diff', 'OffVoA_MeanRating', 'pts_per_100_poss', 'adjoff_ppg', 'DefVoA_MeanRating', 'opppts_per_100_poss', 'adjdef_ppg'])
 
 print(modelendtime - modelstarttime)
+script_end_time = datetime.now()
+print(script_end_time - script_start_time)
