@@ -12,7 +12,7 @@ import seaborn as sbn
 from dotenv import load_dotenv
 from datetime import date, datetime, timedelta
 import cmdstanpy
-import multiprocessing
+# import multiprocessing
 # import pymc as pm
 # import arviz as az
 # import preliz as pz
@@ -174,6 +174,7 @@ else:
 
 ### now onto using mixed-effects models to get opponent-adjusted stats
 ##### Opponent Adjusted Stats using game-level data #####
+random.seed(802)
 if today_dt.month == 10:
     ### calling function to calculate opponent-adjusted stats for each PY and return them all in one polars dataframe
     ## this function is also in the VoAFuncs.py script
@@ -455,6 +456,7 @@ if int(voa_num) == 0:
     ### Compile and Sample
     # OffVoAStanFile = os.path.join(os.getcwd(), "Scripts", "Stan", "MCBB_OffVoA.stan")
     OffVoAStanModel = cmdstanpy.CmdStanModel(stan_file = os.path.join(os.getcwd(), "Scripts", "Stan", "MCBB_OffVoA.stan"))
+    random.seed(802)
     OffVoAStanFit = OffVoAStanModel.sample(
         data = off_stan_datalist,
         iter_sampling = 7500,
@@ -571,6 +573,7 @@ if int(voa_num) == 0:
     ### Compile and Sample
     # DefVoAStanFile = os.path.join(os.getcwd(), "Scripts", "Stan", "MCBB_DefVoA.stan")
     DefVoAStanModel = cmdstanpy.CmdStanModel(stan_file = os.path.join(os.getcwd(), "Scripts", "Stan", "MCBB_DefVoA.stan"))
+    random.seed(802)
     DefVoAStanFit = DefVoAStanModel.sample(
         data = def_stan_datalist,
         iter_sampling = 7500,
@@ -663,11 +666,278 @@ if int(voa_num) == 0:
         DefVoA_025pctRating = DefVoA_lower,
         DefVoA_SD = DefVoA_StDev
     )
-
 elif today_dt.month == 11 or today_dt.month == 12:
-    print("put new VoA stuff here, models should already be fitted so read in params, combine with relevant weighted fields")
+    ### offensive VoA
+    OffVoAStanFit = cmdstanpy.from_csv(os.path.join(
+        os.getcwd(),
+        "Data",
+        "FittedModels",
+        "OffVoAStanFit"
+    ))
+
+    ### assuming the save_csvfiles function works, I don't need to extract the parameters as a pandas df so I can save as a csv or parquet, I can just re-extract them after loading the StanMCMC object using cmdstanpy's from_csv function
+    ### anyway, extracting posterior draws as a dictionary since I (gemini, not me) finally found a way to calculate the ratings that works and doesn't produce numpy matrix multiplication errors
+    OffVoA_draws_dict = OffVoAStanFit.stan_variables()
+
+    ### using matrix math to turn posterior samples from Stan model into win probability projections for each game
+    OffVoA_design_matrix = np.column_stack(
+        [
+            np.ones(VoAStats.height),
+            # VoAStats["weighted_adjoff_ppg"].to_numpy(),
+            VoAStats["weighted_adjoff_points_per_poss"].to_numpy(),
+            VoAStats["weighted_adjoff_assists"].to_numpy(),
+            VoAStats["weighted_adjoff_true_shooting"].to_numpy(),
+            VoAStats["weighted_adjoff_opp_blocks"].to_numpy(),
+            VoAStats["weighted_adjoff_opp_steals"].to_numpy(),
+            VoAStats["weighted_adjoff_field_goals_pct"].to_numpy(),
+            VoAStats["weighted_adjoff_two_point_field_goals_pct"].to_numpy(),
+            VoAStats["weighted_adjoff_three_point_field_goals_pct"].to_numpy(),
+            VoAStats["weighted_adjoff_free_throws_pct"].to_numpy(),
+            VoAStats["weighted_adjoff_rebounds_offensive"].to_numpy(),
+            VoAStats["weighted_adjoff_turnovers_total"].to_numpy()
+        ]
+    )
+
+    ### list of parameter names (sigma to be factored in later)
+    OffVoA_param_names = ["b0", "beta_off_ppp", "beta_off_assists", "beta_off_trueshooting", "beta_off_oppblocks", "beta_off_oppsteals", "beta_off_fgpct", "beta_off_2ptfgpct", "beta_off_3ptfgpct", "beta_off_ftpct", "beta_off_rebounds", "beta_off_turnovers"]
+
+    ### Extract Parameter Matrix: (N_draws x 2)
+    # OffVoA_pars_matrix = OffVoA_pars.select(["b0", "beta_off_ppp", "beta_off_assists", "beta_off_trueshooting", "beta_off_oppblocks", "beta_off_oppsteals", "beta_off_fgpct", "beta_off_2ptfgpct", "beta_off_3ptfgpct", "beta_off_ftpct", "beta_off_rebounds", "beta_off_turnovers"]).to_numpy()
+    OffVoA_pars_matrix = np.column_stack([OffVoA_draws_dict[name] for name in OffVoA_param_names])
+
+    ### extracting sigma to include error
+    OffVoA_sigma = OffVoA_draws_dict["sigma"]
+
+    ### Matrix Multiplication -> Linear Predictors (N_draws x N_games)
+    OffVoA_means_matrix = OffVoA_pars_matrix @ OffVoA_design_matrix.T
+
+    ### applying sigma parameter to posterior samples of adjusted off ppg to generate Off VoA Ratings
+    P = len(OffVoA_draws_dict['b0'])
+    T_num = VoAStats.height
+    np.random.seed(802)
+
+    noise = np.random.normal(loc=0.0, scale = OffVoA_sigma[:, np.newaxis], size=(P, T_num))
+    OffVoARatings = OffVoA_means_matrix + noise
+
+    ### creating final ratings columns
+    OffVoA_MeanRatings = np.mean(OffVoARatings, axis = 0)
+    OffVoA_MedianRatings = np.median(OffVoARatings, axis = 0)
+    OffVoA_upper = np.percentile(OffVoARatings, 97.5, axis = 0)
+    OffVoA_lower = np.percentile(OffVoARatings, 2.5, axis = 0)
+    OffVoA_StDev = np.std(OffVoARatings, axis = 0)
+
+    ### adding ratings to VoAStats
+    VoAStats = VoAStats.with_columns(
+        OffVoA_MeanRating = OffVoA_MeanRatings,
+        OffVoA_MedianRating = OffVoA_MedianRatings,
+        OffVoA_975pctRating = OffVoA_upper,
+        OffVoA_025pctRating = OffVoA_lower,
+        OffVoA_SD = OffVoA_StDev
+    )
+
+    ### Defensive VoA
+    DefVoAStanFit = cmdstanpy.from_csv(os.path.join(
+        os.getcwd(),
+        "Data",
+        "FittedModels",
+        "DefVoAStanFit"
+    ))
+
+    ### assuming the save_csvfiles function works, I don't need to extract the parameters as a pandas df so I can save as a csv or parquet, I can just re-extract them after loading the StanMCMC object using cmdstanpy's from_csv function
+    ### anyway, extracting posterior draws as a dictionary since I (gemini, not me) finally found a way to calculate the ratings that works and doesn't produce numpy matrix multiplication errors
+    DefVoA_draws_dict = DefVoAStanFit.stan_variables()
+
+    ### using matrix math to turn posterior samples from Stan model into win probability projections for each game
+    DefVoA_design_matrix = np.column_stack(
+        [
+            np.ones(VoAStats.height),
+            # VoAStats["weighted_adjdef_ppg"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_points_per_poss"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_assists"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_true_shooting"].to_numpy(),
+            VoAStats["weighted_adjdef_blocks"].to_numpy(),
+            VoAStats["weighted_adjdef_steals"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_field_goals_pct"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_two_point_field_goals_pct"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_three_point_field_goals_pct"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_free_throws_pct"].to_numpy(),
+            VoAStats["weighted_adjdef_rebounds_defensive"].to_numpy(),
+            VoAStats["weighted_adjdef_opp_turnovers_total"].to_numpy()
+        ]
+    )
+
+    ### list of parameter names (sigma to be factored in later)
+    DefVoA_param_names = ["b0", "beta_def_ppp", "beta_def_assists", "beta_def_trueshooting", "beta_def_blocks", "beta_def_steals", "beta_def_fgpct", "beta_def_2ptfgpct", "beta_def_3ptfgpct", "beta_def_ftpct", "beta_def_rebounds", "beta_def_turnovers"]
+
+    ### Extract Parameter Matrix: (N_draws x 2)
+    # DefVoA_pars_matrix = DefVoA_pars.select(["b0", "beta_def_ppp", "beta_def_assists", "beta_def_trueshooting", "beta_def_oppblocks", "beta_def_oppsteals", "beta_def_fgpct", "beta_def_2ptfgpct", "beta_def_3ptfgpct", "beta_def_ftpct", "beta_def_rebounds", "beta_def_turnovers"]).to_numpy()
+    DefVoA_pars_matrix = np.column_stack([DefVoA_draws_dict[name] for name in DefVoA_param_names])
+
+    ### extracting sigma to include error
+    DefVoA_sigma = DefVoA_draws_dict["sigma"]
+
+    ### Matrix Multiplication -> Linear Predictors (N_draws x N_games)
+    DefVoA_means_matrix = DefVoA_pars_matrix @ DefVoA_design_matrix.T
+
+    ### applying sigma parameter to posterior samples of adjusted def ppg to generate Def VoA Ratings
+    P = len(DefVoA_draws_dict['b0'])
+    T_num = VoAStats.height
+    np.random.seed(802)
+
+    noise = np.random.normal(loc=0.0, scale = DefVoA_sigma[:, np.newaxis], size=(P, T_num))
+    DefVoARatings = DefVoA_means_matrix + noise
+
+    ### creating final ratings columns
+    DefVoA_MeanRatings = np.mean(DefVoARatings, axis = 0)
+    DefVoA_MedianRatings = np.median(DefVoARatings, axis = 0)
+    DefVoA_upper = np.percentile(DefVoARatings, 97.5, axis = 0)
+    DefVoA_lower = np.percentile(DefVoARatings, 2.5, axis = 0)
+    DefVoA_StDev = np.std(DefVoARatings, axis = 0)
+
+    ### adding ratings to VoAStats
+    VoAStats = VoAStats.with_columns(
+        DefVoA_MeanRating = DefVoA_MeanRatings,
+        DefVoA_MedianRating = DefVoA_MedianRatings,
+        DefVoA_975pctRating = DefVoA_upper,
+        DefVoA_025pctRating = DefVoA_lower,
+        DefVoA_SD = DefVoA_StDev
+    )
 else:
-    print("current season only VoA, put stuff here later")
+    ### offensive VoA
+    OffVoAStanFit = cmdstanpy.from_csv(os.path.join(
+        os.getcwd(),
+        "Data",
+        "FittedModels",
+        "OffVoAStanFit"
+    ))
+
+    ### assuming the save_csvfiles function works, I don't need to extract the parameters as a pandas df so I can save as a csv or parquet, I can just re-extract them after loading the StanMCMC object using cmdstanpy's from_csv function
+    ### anyway, extracting posterior draws as a dictionary since I (gemini, not me) finally found a way to calculate the ratings that works and doesn't produce numpy matrix multiplication errors
+    OffVoA_draws_dict = OffVoAStanFit.stan_variables()
+
+    ### using matrix math to turn posterior samples from Stan model into win probability projections for each game
+    OffVoA_design_matrix = np.column_stack(
+        [
+            np.ones(VoAStats.height),
+            # VoAStats["adjoff_ppg"].to_numpy(),
+            VoAStats["adjoff_points_per_poss"].to_numpy(),
+            VoAStats["adjoff_assists"].to_numpy(),
+            VoAStats["adjoff_true_shooting"].to_numpy(),
+            VoAStats["adjoff_opp_blocks"].to_numpy(),
+            VoAStats["adjoff_opp_steals"].to_numpy(),
+            VoAStats["adjoff_field_goals_pct"].to_numpy(),
+            VoAStats["adjoff_two_point_field_goals_pct"].to_numpy(),
+            VoAStats["adjoff_three_point_field_goals_pct"].to_numpy(),
+            VoAStats["adjoff_free_throws_pct"].to_numpy(),
+            VoAStats["adjoff_rebounds_offensive"].to_numpy(),
+            VoAStats["adjoff_turnovers_total"].to_numpy()
+        ]
+    )
+
+    ### list of parameter names (sigma to be factored in later)
+    OffVoA_param_names = ["b0", "beta_off_ppp", "beta_off_assists", "beta_off_trueshooting", "beta_off_oppblocks", "beta_off_oppsteals", "beta_off_fgpct", "beta_off_2ptfgpct", "beta_off_3ptfgpct", "beta_off_ftpct", "beta_off_rebounds", "beta_off_turnovers"]
+
+    ### Extract Parameter Matrix: (N_draws x 2)
+    # OffVoA_pars_matrix = OffVoA_pars.select(["b0", "beta_off_ppp", "beta_off_assists", "beta_off_trueshooting", "beta_off_oppblocks", "beta_off_oppsteals", "beta_off_fgpct", "beta_off_2ptfgpct", "beta_off_3ptfgpct", "beta_off_ftpct", "beta_off_rebounds", "beta_off_turnovers"]).to_numpy()
+    OffVoA_pars_matrix = np.column_stack([OffVoA_draws_dict[name] for name in OffVoA_param_names])
+
+    ### extracting sigma to include error
+    OffVoA_sigma = OffVoA_draws_dict["sigma"]
+
+    ### Matrix Multiplication -> Linear Predictors (N_draws x N_games)
+    OffVoA_means_matrix = OffVoA_pars_matrix @ OffVoA_design_matrix.T
+
+    ### applying sigma parameter to posterior samples of adjusted off ppg to generate Off VoA Ratings
+    P = len(OffVoA_draws_dict['b0'])
+    T_num = VoAStats.height
+    np.random.seed(802)
+
+    noise = np.random.normal(loc=0.0, scale = OffVoA_sigma[:, np.newaxis], size=(P, T_num))
+    OffVoARatings = OffVoA_means_matrix + noise
+
+    ### creating final ratings columns
+    OffVoA_MeanRatings = np.mean(OffVoARatings, axis = 0)
+    OffVoA_MedianRatings = np.median(OffVoARatings, axis = 0)
+    OffVoA_upper = np.percentile(OffVoARatings, 97.5, axis = 0)
+    OffVoA_lower = np.percentile(OffVoARatings, 2.5, axis = 0)
+    OffVoA_StDev = np.std(OffVoARatings, axis = 0)
+
+    ### adding ratings to VoAStats
+    VoAStats = VoAStats.with_columns(
+        OffVoA_MeanRating = OffVoA_MeanRatings,
+        OffVoA_MedianRating = OffVoA_MedianRatings,
+        OffVoA_975pctRating = OffVoA_upper,
+        OffVoA_025pctRating = OffVoA_lower,
+        OffVoA_SD = OffVoA_StDev
+    )
+
+    ### Defensive VoA
+    DefVoAStanFit = cmdstanpy.from_csv(os.path.join(
+        os.getcwd(),
+        "Data",
+        "FittedModels",
+        "DefVoAStanFit"
+    ))
+
+    ### assuming the save_csvfiles function works, I don't need to extract the parameters as a pandas df so I can save as a csv or parquet, I can just re-extract them after loading the StanMCMC object using cmdstanpy's from_csv function
+    ### anyway, extracting posterior draws as a dictionary since I (gemini, not me) finally found a way to calculate the ratings that works and doesn't produce numpy matrix multiplication errors
+    DefVoA_draws_dict = DefVoAStanFit.stan_variables()
+
+    ### using matrix math to turn posterior samples from Stan model into win probability projections for each game
+    DefVoA_design_matrix = np.column_stack(
+        [
+            np.ones(VoAStats.height),
+            # VoAStats["adjdef_ppg"].to_numpy(),
+            VoAStats["adjdef_opp_points_per_poss"].to_numpy(),
+            VoAStats["adjdef_opp_assists"].to_numpy(),
+            VoAStats["adjdef_opp_true_shooting"].to_numpy(),
+            VoAStats["adjdef_blocks"].to_numpy(),
+            VoAStats["adjdef_steals"].to_numpy(),
+            VoAStats["adjdef_opp_field_goals_pct"].to_numpy(),
+            VoAStats["adjdef_opp_two_point_field_goals_pct"].to_numpy(),
+            VoAStats["adjdef_opp_three_point_field_goals_pct"].to_numpy(),
+            VoAStats["adjdef_opp_free_throws_pct"].to_numpy(),
+            VoAStats["adjdef_rebounds_defensive"].to_numpy(),
+            VoAStats["adjdef_opp_turnovers_total"].to_numpy()
+        ]
+    )
+
+    ### list of parameter names (sigma to be factored in later)
+    DefVoA_param_names = ["b0", "beta_def_ppp", "beta_def_assists", "beta_def_trueshooting", "beta_def_blocks", "beta_def_steals", "beta_def_fgpct", "beta_def_2ptfgpct", "beta_def_3ptfgpct", "beta_def_ftpct", "beta_def_rebounds", "beta_def_turnovers"]
+
+    ### Extract Parameter Matrix: (N_draws x 2)
+    # DefVoA_pars_matrix = DefVoA_pars.select(["b0", "beta_def_ppp", "beta_def_assists", "beta_def_trueshooting", "beta_def_oppblocks", "beta_def_oppsteals", "beta_def_fgpct", "beta_def_2ptfgpct", "beta_def_3ptfgpct", "beta_def_ftpct", "beta_def_rebounds", "beta_def_turnovers"]).to_numpy()
+    DefVoA_pars_matrix = np.column_stack([DefVoA_draws_dict[name] for name in DefVoA_param_names])
+
+    ### extracting sigma to include error
+    DefVoA_sigma = DefVoA_draws_dict["sigma"]
+
+    ### Matrix Multiplication -> Linear Predictors (N_draws x N_games)
+    DefVoA_means_matrix = DefVoA_pars_matrix @ DefVoA_design_matrix.T
+
+    ### applying sigma parameter to posterior samples of adjusted def ppg to generate Def VoA Ratings
+    P = len(DefVoA_draws_dict['b0'])
+    T_num = VoAStats.height
+    np.random.seed(802)
+
+    noise = np.random.normal(loc=0.0, scale = DefVoA_sigma[:, np.newaxis], size=(P, T_num))
+    DefVoARatings = DefVoA_means_matrix + noise
+
+    ### creating final ratings columns
+    DefVoA_MeanRatings = np.mean(DefVoARatings, axis = 0)
+    DefVoA_MedianRatings = np.median(DefVoARatings, axis = 0)
+    DefVoA_upper = np.percentile(DefVoARatings, 97.5, axis = 0)
+    DefVoA_lower = np.percentile(DefVoARatings, 2.5, axis = 0)
+    DefVoA_StDev = np.std(DefVoARatings, axis = 0)
+
+    ### adding ratings to VoAStats
+    VoAStats = VoAStats.with_columns(
+        DefVoA_MeanRating = DefVoA_MeanRatings,
+        DefVoA_MedianRating = DefVoA_MedianRatings,
+        DefVoA_975pctRating = DefVoA_upper,
+        DefVoA_025pctRating = DefVoA_lower,
+        DefVoA_SD = DefVoA_StDev
+    )
  
 
 
