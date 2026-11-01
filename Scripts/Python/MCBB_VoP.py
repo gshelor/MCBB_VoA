@@ -7,11 +7,10 @@ import polars as pl
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sbn
+# import seaborn as sbn
 from dotenv import load_dotenv
 from datetime import date, datetime, timedelta
 from great_tables import GT
-# import great_tables
 import cmdstanpy
 # import pymc as pm
 # import arviz as az
@@ -61,7 +60,7 @@ gamesapi_instance = cbbd.GamesApi(api_client)
 
 
 ### loading games to be projected
-if today_dt.month == 10:
+if today_dt.month == 10 or int(voa_num) == 0:
     VoAStats = pl.read_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "MCBBVoA" + str(cbb_season) + "VoA" + voa_num + ".parquet"))
     ### reading in games from at least the first month of the season
     UpcomingGames = gamesapi_instance.get_games(start_date_range = today_dt, end_date_range = today_dt + timedelta(days = 50))
@@ -217,7 +216,7 @@ VoP_win_probs = 1 / (1 + np.exp(-WP_means_matrix))
 ### Calculate median win probability across draws/ for each game (axis=0 operates across draws)
 VoP_median_win_probs = np.median(VoP_win_probs, axis=0)
 
-
+### adding projected winner and projected win probability columns
 UpcomingGames_df = UpcomingGames_df.with_columns(
     proj_winner = pl.when(pl.col('proj_margin') < 0).then(pl.col('home_team'))
     .when(pl.col('proj_margin') > 0).then(pl.col('away_team'))
