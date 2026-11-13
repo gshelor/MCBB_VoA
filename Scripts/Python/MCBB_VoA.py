@@ -123,13 +123,45 @@ elif today_dt.month == 11 and today_dt.day < 15:
     ### reading in PY1 and PY2 stats saved from preseason VoA
     PYData = pl.read_parquet(os.path.join(
         os.getcwd(),
-        "VoA" + cbb_season,
+        "Data",
+        "VoA" + str(cbb_season),
         "PYData",
-        "VoA" + cbb_season + "PYData.parquet"
-    ))
+        "VoA" + str(cbb_season) + "PYData.parquet"
+    )).select(["team", pl.selectors.ends_with("_PY1", "_PY2")])
+    ### getting team info to make sure I have all D1 teams for the current season that have previous stats
+    Teams_json = teamsapi_instance.get_teams(season = cbb_season)
+    Teams_df = pl.DataFrame(Teams_json).rename({"school": "team"})
+
+    ### the logos column coerces to a list type to I'm moving each unique logo URL to its own column
+    ### then, filtering the df of current D1 teams to only include teams with 3 years of PY data, so that I can 
+    max_width = Teams_df['logos'].list.len().max()
+    VoATeams = Teams_df.with_columns(
+        pl.col('logos').list.get(x, null_on_oob=True).alias(f'logo_{x}') for x in range(max_width)).filter(
+            pl.col('team').is_in(PYData['team'].implode())
+        ).with_columns(voa_iter = int(voa_num))
     ### getting current season stats
     TeamSeasonStats_json = statsapi_instance.get_team_season_stats(cbb_season)
-    VoAStats = clean_season_stats(TeamSeasonStats_json)
+    VoAStats = VoATeams.join(clean_season_stats(TeamSeasonStats_json), on = "team", how = "left").join(PYData, on = "team", how = "left")
+
+    ### getting games for opponent-adjusted stats
+    ### reading in df of previous games so I don't have to pull in old games every time I rerun the VoA
+    # AllGamesStatAdj = pl.read_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "GameStats", "MCBBD1VoA" + str(cbb_season) + "Games.parquet"))
+    Games_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2026, 11, 1, 0,0,0), end_date_range = datetime(today_dt.year, today_dt.month, today_dt.day - 1, 23, 59, 59))
+    AllGamesStatAdj = clean_team_game_stats(Games_json)
+    ### saving AllGamesStatAdj so I don't have to hit the API for every game every time I run the script
+    AllGamesStatAdj.write_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "GameStats", "MCBBD1VoA" + str(cbb_season) + "Games.parquet"))
+    ### Adding new columns now that I've saved it so new games can be added to the df
+    AllGamesStatAdj = AllGamesStatAdj.with_columns(
+            pl.when(pl.col('neutral_site') == True).then(0)
+            .when(pl.col('neutral_site') == False, pl.col('is_home') == True).then(1)
+            .otherwise(-1)
+            .alias("hfa"),
+            points_per_poss = pl.col("points_total") / pl.col("possessions"),
+            opp_points_per_poss = pl.col("opp_points_total") / pl.col("opp_possessions")
+        )
+    AllGamesPaceAdj = AllGamesStatAdj.group_by("game_id").first()
+elif today_dt.month == 12:
+    print("when reading in PY data, just PY1 data")
 else:
     ### only current season info
     TeamSeasonStats_json = statsapi_instance.get_team_season_stats(cbb_season)
@@ -209,7 +241,14 @@ if today_dt.month == 10:
         adjdef_ppg_PY1 = pl.col("adjdef_opp_points_per_poss_PY1") * pl.col("adj_pace_PY1").mean()
     )
 elif today_dt.month == 11:
-    print("might do something here too")
+    ### calling function to calculate opponent-adjusted stats and return them all in one polars dataframe
+    ## this function is also in the VoAFuncs.py script
+    # function call: opponent_adjustments(pace_df, full_df)
+    AdjStats = opponent_adjustments(AllGamesPaceAdj, AllGamesStatAdj)
+    VoAStats = VoAStats.join(AdjStats, on = "team").with_columns(
+        adjoff_ppg = pl.col("adjoff_points_per_poss") * pl.col("adj_pace").mean(),
+        adjdef_ppg = pl.col("adjdef_opp_points_per_poss") * pl.col("adj_pace").mean()
+    ).join(PYData, on = "team", how = "left")
 else:
     ### calling function to calculate opponent-adjusted stats and return them all in one polars dataframe
     ## this function is also in the VoAFuncs.py script

@@ -99,45 +99,15 @@ else:
     HomeVoARating = VoARatings.rename({'team': 'home_team', 'OvrlVoA_MeanRating': 'home_rating'})
     AwayVoARating = VoARatings.rename({'team': 'away_team', 'OvrlVoA_MeanRating': 'away_rating'})
     ### reading in csv of prior predictions to be bound to upcoming games df so I can save all predictions together in one csv
-    PriorPreds = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "Projections", "MCBBVoA" + datestring + "GameProjections.csv"), schema = {
-        'id': pl.Int64,
-        'source_id': pl.String,
-        'season_label': pl.String,
-        'season': pl.Int64,
-        'season_type': pl.String,
-        'start_date': pl.Datetime(time_unit='us', time_zone=None),
-        'start_time_tbd': pl.Boolean,
-        'neutral_site': pl.Boolean,
-        'conference_game': pl.Boolean,
-        'game_type': pl.String,
-        'tournament': pl.String,
-        'game_notes': pl.String,
-        'status': pl.String,
-        'home_team_id': pl.Int64,
-        'home_team': pl.String,
-        'home_conference_id': pl.Int64,
-        'home_conference': pl.String,
-        'home_seed': pl.Int64,
-        'away_team_id': pl.Int64,
-        'away_team': pl.String,
-        'away_conference_id': pl.Int64,
-        'away_conference': pl.String,
-        'away_seed': pl.Int64,
-        'venue_id': pl.Int64,
-        'venue': pl.String,
-        'city': pl.String,
-        'state': pl.String,
-        'home_rating': pl.Float64,
-        'away_rating': pl.Float64,
-        'proj_margin': pl.Float64,
-        'proj_winner': pl.String})
+    PriorPreds = pl.read_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "Projections", "MCBBVoA" + datestring + "GameProjections.parquet")).filter(
+            pl.col('start_date') <= datetime(today_dt.year, today_dt.month, today_dt.day, 0, 0, 0))
 
     ### reading in old projections to use as inputs for a win probability model built with Stan and cmdstanpy
     ## PY2 commented out for now since I only first started doing a MCBB VoA in spring 2026, so there's not 2 seasons of projections yet
     PrevVoAPreds_PY1 = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(int(cbb_season) - 1), "AccuracyMetrics", "VoACompletedGames" + str(int(cbb_season) - 1) + "AccuracyMetrics.csv")).select(["proj_margin", "VoA_correct_winner"])
     # PrevVoAPreds_PY2 = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(int(cfb_year) - 2), "AccuracyMetrics", "Games", "VoA" + str(int(cfb_year) - 2) + "Week1Week17GameAccuracyMetrics.csv")).select(["proj_margin", "straight_up_win"])
-    PrevVoAPreds = pl.read_csv(os.path.join(os.getcwd(), "Data", "VoA" + str(int(cbb_season)), "AccuracyMetrics", "VoACompletedGames" + str(int(cbb_season)) + "AccuracyMetrics.csv")).select(["proj_margin", "VoA_correct_winner"])
-    PrevVoAPreds = pl.concat([PrevVoAPreds_PY1, PrevVoAPreds], how = "vertical")
+    PrevVoAPreds = pl.read_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(int(cbb_season)), "AccuracyMetrics", "VoACompletedGames" + str(int(cbb_season)) + "AccuracyMetrics.parquet")).select(["proj_margin", "VoA_correct_winner"])
+    PrevVoAPreds = pl.concat([PrevVoAPreds_PY1, PrevVoAPreds], how = "vertical_relaxed")
     
 
 
