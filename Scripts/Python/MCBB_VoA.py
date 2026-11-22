@@ -119,7 +119,7 @@ if today_dt.month == 10:
     GamesPaceAdj_PY3 = Games_PY3.group_by("game_id").first()
     GamesPaceAdj_PY2 = Games_PY2.group_by("game_id").first()
     GamesPaceAdj_PY1 = Games_PY1.group_by("game_id").first()
-elif today_dt.month == 11 and today_dt.day < 15:
+elif today_dt.month == 11 and today_dt.day <= 15:
     ### reading in PY1 and PY2 stats saved from preseason VoA
     PYData = pl.read_parquet(os.path.join(
         os.getcwd(),
@@ -160,8 +160,99 @@ elif today_dt.month == 11 and today_dt.day < 15:
             opp_points_per_poss = pl.col("opp_points_total") / pl.col("opp_possessions")
         )
     AllGamesPaceAdj = AllGamesStatAdj.group_by("game_id").first()
+elif today_dt.month == 11 and today_dt.day > 15:
+    ### reading in PY1 and PY2 stats saved from preseason VoA
+    PYData = pl.read_parquet(os.path.join(
+        os.getcwd(),
+        "Data",
+        "VoA" + str(cbb_season),
+        "PYData",
+        "VoA" + str(cbb_season) + "PYData.parquet"
+    )).select(["team", pl.selectors.ends_with("_PY1")])
+    ### getting team info to make sure I have all D1 teams for the current season that have previous stats
+    Teams_json = teamsapi_instance.get_teams(season = cbb_season)
+    Teams_df = pl.DataFrame(Teams_json).rename({"school": "team"})
+
+    ### the logos column coerces to a list type to I'm moving each unique logo URL to its own column
+    ### then, filtering the df of current D1 teams to only include teams with 3 years of PY data, so that I can 
+    max_width = Teams_df['logos'].list.len().max()
+    VoATeams = Teams_df.with_columns(
+        pl.col('logos').list.get(x, null_on_oob=True).alias(f'logo_{x}') for x in range(max_width)).filter(
+            pl.col('team').is_in(PYData['team'].implode())
+        ).with_columns(voa_iter = int(voa_num))
+    ### getting current season stats
+    TeamSeasonStats_json = statsapi_instance.get_team_season_stats(cbb_season)
+    VoAStats = VoATeams.join(clean_season_stats(TeamSeasonStats_json), on = "team", how = "left").join(PYData, on = "team", how = "left")
+
+    ### getting games for opponent-adjusted stats
+    ### reading in df of previous games so I don't have to pull in old games every time I rerun the VoA
+    AllGamesStatAdj = pl.read_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "GameStats", "MCBBD1VoA" + str(cbb_season) + "Games.parquet"))
+    Games_json = gamesapi_instance.get_game_teams(start_date_range = max(AllGamesStatAdj['start_date']), end_date_range = datetime(today_dt.year, today_dt.month, today_dt.day - 1, 23, 59, 59))
+    ### cleaning new set of game data from games that happened after last run of VoA
+    CleanGames_df = clean_team_game_stats(Games_json)
+    ### binding new clean games to previous games already saved (AllGamesStatAdj)
+    AllGamesStatAdj = pl.concat(
+        [AllGamesStatAdj, CleanGames_df], how = "vertical_relaxed").filter(
+            (pl.col("team").is_in(VoAStats['team'].implode()) & pl.col("opponent").is_in(VoAStats['team'].implode()))
+        )
+    ### saving AllGamesStatAdj so I don't have to hit the API for every game every time I run the script
+    AllGamesStatAdj.write_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "GameStats", "MCBBD1VoA" + str(cbb_season) + "Games.parquet"))
+    ### Adding new columns now that I've saved it so new games can be added to the df
+    AllGamesStatAdj = AllGamesStatAdj.with_columns(
+            pl.when(pl.col('neutral_site') == True).then(0)
+            .when(pl.col('neutral_site') == False, pl.col('is_home') == True).then(1)
+            .otherwise(-1)
+            .alias("hfa"),
+            points_per_poss = pl.col("points_total") / pl.col("possessions"),
+            opp_points_per_poss = pl.col("opp_points_total") / pl.col("opp_possessions")
+        )
+    AllGamesPaceAdj = AllGamesStatAdj.group_by("game_id").first()
 elif today_dt.month == 12:
-    print("when reading in PY data, just PY1 data")
+    ### reading in PY1 and PY2 stats saved from preseason VoA
+    PYData = pl.read_parquet(os.path.join(
+        os.getcwd(),
+        "Data",
+        "VoA" + str(cbb_season),
+        "PYData",
+        "VoA" + str(cbb_season) + "PYData.parquet"
+    )).select(["team", pl.selectors.ends_with("_PY1")])
+    ### getting team info to make sure I have all D1 teams for the current season that have previous stats
+    Teams_json = teamsapi_instance.get_teams(season = cbb_season)
+    Teams_df = pl.DataFrame(Teams_json).rename({"school": "team"})
+
+    ### the logos column coerces to a list type to I'm moving each unique logo URL to its own column
+    ### then, filtering the df of current D1 teams to only include teams with 3 years of PY data, so that I can 
+    max_width = Teams_df['logos'].list.len().max()
+    VoATeams = Teams_df.with_columns(
+        pl.col('logos').list.get(x, null_on_oob=True).alias(f'logo_{x}') for x in range(max_width)).filter(
+            pl.col('team').is_in(PYData['team'].implode())
+        ).with_columns(voa_iter = int(voa_num))
+    ### getting current season stats
+    TeamSeasonStats_json = statsapi_instance.get_team_season_stats(cbb_season)
+    VoAStats = VoATeams.join(clean_season_stats(TeamSeasonStats_json), on = "team", how = "left").join(PYData, on = "team", how = "left")
+
+    ### getting games for opponent-adjusted stats
+    ### reading in df of previous games so I don't have to pull in old games every time I rerun the VoA
+    AllGamesStatAdj = pl.read_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "GameStats", "MCBBD1VoA" + str(cbb_season) + "Games.parquet"))
+    Games_json = gamesapi_instance.get_game_teams(start_date_range = max(AllGamesStatAdj['start_date']), end_date_range = datetime(today_dt.year, today_dt.month, today_dt.day - 1, 23, 59, 59))
+    CleanGames_df = clean_team_game_stats(Games_json)
+    ### binding new clean games to previous games already saved (AllGamesStatAdj)
+    AllGamesStatAdj = pl.concat(
+        [AllGamesStatAdj, CleanGames_df], how = "vertical_relaxed").filter(
+            (pl.col("team").is_in(VoAStats['team'].implode()) & pl.col("opponent").is_in(VoAStats['team'].implode()))
+        )
+    ### saving AllGamesStatAdj so I don't have to hit the API for every game every time I run the script
+    AllGamesStatAdj.write_parquet(os.path.join(os.getcwd(), "Data", "VoA" + str(cbb_season), "GameStats", "MCBBD1VoA" + str(cbb_season) + "Games.parquet"))
+    ### Adding new columns now that I've saved it so new games can be added to the df
+    AllGamesStatAdj = AllGamesStatAdj.with_columns(
+            pl.when(pl.col('neutral_site') == True).then(0)
+            .when(pl.col('neutral_site') == False, pl.col('is_home') == True).then(1)
+            .otherwise(-1)
+            .alias("hfa"),
+            points_per_poss = pl.col("points_total") / pl.col("possessions"),
+            opp_points_per_poss = pl.col("opp_points_total") / pl.col("opp_possessions")
+        )
+    AllGamesPaceAdj = AllGamesStatAdj.group_by("game_id").first()
 else:
     ### only current season info
     TeamSeasonStats_json = statsapi_instance.get_team_season_stats(cbb_season)
@@ -176,11 +267,6 @@ else:
     # Games5_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2026, 2, 1), end_date_range = datetime(2026, 3, 2, 23, 59, 59))
     # Games6_json = gamesapi_instance.get_game_teams(start_date_range = datetime(2026, 3, 3), end_date_range = datetime(today_dt.year, today_dt.month, today_dt.day - 1, 23, 59, 59))
     CleanGames_df = clean_team_game_stats(Games_json)
-    # CleanGames2_df = clean_team_game_stats(Games2_json)
-    # CleanGames3_df = clean_team_game_stats(Games3_json)
-    # CleanGames4_df = clean_team_game_stats(Games4_json)
-    # CleanGames5_df = clean_team_game_stats(Games5_json)
-    # CleanGames6_df = clean_team_game_stats(Games6_json)
     ### binding cleaned games together
     ### polars gives a warning that the is_in() in the filter part of the code below is deprecated (as of March 2, 2026 I'm on polars version 1.37.1) but it works and does what I want it to and everybody in the github issue it links to (https://github.com/pola-rs/polars/issues/22149) is mad that it would be producing an issue at all, given that the below usage of is_in() is what they all think would be the most common usage would be (and I agree) so hopefully it stays intact
     ## since I encountered this issue last spring I've since found that using implode() after the is_in produces the same effect and doesn't product the warning so I'm just going to keep that until I update the library or whatever

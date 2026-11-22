@@ -2,7 +2,8 @@
 ### gt isn't working in python so I'm taking the output csv, reading it in here, and making all the gt tables and plots that I want with it here in R since I've almost always gotten gt to work in R
 ##### loading packages, reading in data #####
 library(pacman)
-p_load(tidyverse, gt, gtExtras, here, webshot2, data.table, RColorBrewer, arrow)
+# fmt: skip
+p_load(tidyverse, gt, gtExtras, here, webshot2, data.table, dtplyr, RColorBrewer, arrow)
 
 year <- as.integer(format(Sys.Date(), "%Y"))
 month <- as.integer(format(Sys.Date(), "%m"))

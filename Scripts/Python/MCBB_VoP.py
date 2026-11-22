@@ -225,13 +225,13 @@ UpcomingGamesTable_df = UpcomingGames_df.filter(
         ['tournament', 'start_date', 'home_team', 'home_rating', 'away_team', 'away_rating', 'proj_margin', 'proj_winner', 'proj_margin_abs', 'win_prob']
         )
 UpcomingGamesTable_df_sorted = UpcomingGamesTable_df.sort('proj_margin_abs', descending = True)
-Top50ProjMargins = UpcomingGamesTable_df_sorted.filter(
-    (pl.col('start_date') < (today_dt + timedelta(days = 7)))).head(50)
-Top50ProjMargins.write_csv(os.path.join(
+Top25ProjMargins = UpcomingGamesTable_df_sorted.filter(
+    (pl.col('start_date') < (today_dt + timedelta(days = 3)))).head(25)
+Top25ProjMargins.write_csv(os.path.join(
     os.getcwd(),
     "Data",
     "Bets",
-    "MCBBTop50ProjGames.csv"
+    "MCBBTop25ProjGames.csv"
 ))
 ### creating games table using gt
 GamesTable_gt = (

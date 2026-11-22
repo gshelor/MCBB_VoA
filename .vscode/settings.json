@@ -6,5 +6,6 @@
     "[quarto]": {
         "editor.formatOnSave": true,
         "editor.defaultFormatter": "quarto.quarto"
-    }
+    },
+    "positron.julia.languageServer.environmentPath": "/Users/griffinshelor/Documents/Personal/Coding/MCBB_VoA"
 }
